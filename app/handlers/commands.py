@@ -1,5 +1,5 @@
 """
-Telegram Bot Command Handlers.
+Telegram Bot Command Handlers (Top 4 Elite AI Engines).
 """
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode, ChatAction
@@ -29,16 +29,16 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     welcome_text = (
         f"👋 *Olá, {update.effective_user.first_name}! Bem-vindo ao BrainBot.*\n"
-        "Seu assistente de inteligência artificial de elite, conectado aos melhores modelos abertos e gratuitos.\n\n"
-        "🤖 *Modelo Atual:* `" + user['selected_model'].upper() + "`\n\n"
-        "📌 *Comandos Principais:*\n"
-        "• ⚙️ `/modelos` - Alternar modelo (Gemini, Llama 3.3, DeepSeek)\n"
+        "Seu assistente institucional de IA conectado aos 4 motores mais avançados do mundo.\n\n"
+        "🤖 *Modelo Ativo:* `" + user['selected_model'].upper() + "`\n\n"
+        "📌 *Comandos Rápidos:*\n"
+        "• ⚙️ `/modelos` - Alternar entre DeepSeek, Gemini, Groq e GPT-4o\n"
         "• 🌐 `/web <busca>` - Pesquisa ao vivo na internet\n"
         "• 🎨 `/imagem <prompt>` - Gerar imagem em alta definição\n"
         "• 🧹 `/limpar` - Reiniciar memória da conversa\n"
-        "• 📊 `/status` - Métricas de uso e modelo atual\n"
-        "• 🎭 `/prompt <texto>` - Definir personalidade personalizada\n\n"
-        "💡 *Recursos Nativos:* Você pode me enviar **Áudios de voz**, **Fotos**, **PDFs** ou **Códigos** diretamente no chat!"
+        "• 📊 `/status` - Estatísticas de uso e telemetria\n"
+        "• 🎭 `/prompt <texto>` - Definir personalidade customizada\n\n"
+        "💡 *Recursos Nativos:* Você pode me enviar **Áudios de voz**, **Fotos/OCR**, **PDFs** ou **Códigos** diretamente no chat!"
     )
     await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN)
 
@@ -48,20 +48,19 @@ async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [
+            InlineKeyboardButton("💡 DeepSeek V4/V3 (Código/Texto)", callback_data="set_model:deepseek"),
+            InlineKeyboardButton("🔬 DeepSeek R1 (Raciocínio)", callback_data="set_model:deepseek-r1"),
+        ],
+        [
             InlineKeyboardButton("⚡ Gemini 2.0 Flash (Google Grátis)", callback_data="set_model:gemini"),
             InlineKeyboardButton("🌟 Gemini 1.5 Pro (Google Grátis)", callback_data="set_model:gemini-pro"),
         ],
         [
-            InlineKeyboardButton("🚀 Llama 3.3 70B (Groq Grátis)", callback_data="set_model:groq-llama"),
-            InlineKeyboardButton("🧠 DeepSeek R1 (Groq Grátis)", callback_data="set_model:groq-r1"),
+            InlineKeyboardButton("🚀 Llama 3.3 70B (Groq 300+ tok/s)", callback_data="set_model:groq-llama"),
         ],
         [
-            InlineKeyboardButton("💡 DeepSeek V3 (Oficial)", callback_data="set_model:deepseek"),
-            InlineKeyboardButton("🔬 DeepSeek R1 (Oficial)", callback_data="set_model:deepseek-r1"),
-        ],
-        [
-            InlineKeyboardButton("🌐 OpenRouter Free Router", callback_data="set_model:openrouter-free"),
-            InlineKeyboardButton("🟢 GPT-4o Mini (OpenAI)", callback_data="set_model:openai"),
+            InlineKeyboardButton("🟢 GPT-4o Oficial (GitHub Models)", callback_data="set_model:github-gpt4o"),
+            InlineKeyboardButton("🟢 GPT-4o Mini (GitHub Models)", callback_data="set_model:github-gpt4o-mini"),
         ],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -82,17 +81,15 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(user_id): return
 
     user = await db.get_or_create_user(user_id)
-    stats = await db.get_user_stats(user_id)
     model_info = llm_router.AVAILABLE_MODELS.get(user['selected_model'], {})
 
     status_text = (
         "📊 *Status do Sistema & Métricas*\n\n"
         f"🤖 *Modelo Ativo:* {model_info.get('name', user['selected_model'])}\n"
         f"🏢 *Provedor:* {model_info.get('provider', 'N/A')}\n"
-        f"💬 *Mensagens Enviadas:* `{stats['total_messages']}`\n"
-        f"🎨 *Imagens Geradas:* `{stats['total_images']}`\n"
-        f"🌐 *Buscas na Web:* `{stats['total_searches']}`\n"
-        f"🔑 *Modo de Acesso:* `{settings.ACCESS_MODE}`"
+        f"📝 *Função:* _{model_info.get('description', '')}_\n"
+        f"🔑 *Modo de Acesso:* `{settings.ACCESS_MODE}`\n"
+        f"⭐ *Seu Plano:* `{user.get('tier', 'free').upper()}`"
     )
     await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
 
