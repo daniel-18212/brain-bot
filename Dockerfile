@@ -1,27 +1,16 @@
 # =====================================================================
-# Enterprise Multi-Stage Dockerfile for BrainBot
+# Enterprise Production Dockerfile for BrainBot (Instant Build)
 # =====================================================================
-FROM python:3.12-slim AS builder
-
-WORKDIR /build
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
-
-# --- Final Runtime Image ---
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim
 
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH=/home/appuser/.local/bin:$PATH \
     PYTHONPATH=/app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Cria usuário não-root por segurança
 RUN groupadd -g 1000 appgroup && \
@@ -29,7 +18,6 @@ RUN groupadd -g 1000 appgroup && \
     mkdir -p /app/data && \
     chown -R appuser:appgroup /app
 
-COPY --from=builder /root/.local /home/appuser/.local
 COPY --chown=appuser:appgroup . /app
 
 USER appuser
