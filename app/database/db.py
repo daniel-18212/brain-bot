@@ -96,6 +96,26 @@ class Database:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_usage_user_id ON usage_metrics(user_id, created_at);")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status, role);")
 
+            # Auto-Migração Dinâmica de Colunas (Garante compatibilidade total em updates)
+            async with db.execute("PRAGMA table_info(users)") as cursor:
+                existing_cols = [c[1] for c in await cursor.fetchall()]
+                expected_cols = {
+                    "role": "TEXT DEFAULT 'user'",
+                    "status": "TEXT DEFAULT 'active'",
+                    "tier": "TEXT DEFAULT 'unlimited'",
+                    "selected_model": "TEXT DEFAULT 'deepseek'",
+                    "custom_system_prompt": "TEXT",
+                    "voice_mode_enabled": "INTEGER DEFAULT 0",
+                    "daily_requests_count": "INTEGER DEFAULT 0",
+                    "last_request_date": "TEXT",
+                    "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+                    "last_active_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                }
+                for col_name, col_def in expected_cols.items():
+                    if col_name not in existing_cols:
+                        logger.info(f"Auto-migrando coluna '{col_name}' na tabela 'users'...")
+                        await db.execute(f"ALTER TABLE users ADD COLUMN {col_name} {col_def}")
+
             # Garante que o Admin Principal tenha role 'admin', status 'active' e tier 'unlimited'
             if settings.ADMIN_USER_ID:
                 await db.execute(
