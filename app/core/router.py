@@ -1,11 +1,11 @@
 """
-Unified Multi-Provider LLM Router for Top 4 Elite Engines:
+Unified Multi-Provider LLM Router with Auto-Failover, Fallback Alerts, and Footer Badges.
 1. DeepSeek API (V4 / V3 & R1 Reasoner)
 2. Google Gemini (2.0 Flash & 1.5 Pro - Free Tier)
 3. Groq Cloud (Llama 3.3 70B & DeepSeek R1 Distill - Free Tier)
 4. GitHub Models / Azure AI (Official GPT-4o & GPT-4o Mini - Free Tier)
 """
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Tuple
 import logging
 from openai import AsyncOpenAI
 import google.generativeai as genai
@@ -24,45 +24,58 @@ class LLMRouter:
     DEFAULT_SYSTEM_PROMPT = """Você é o BrainBot, um assistente de inteligência artificial de elite, versátil, ultra-rápido, perspicaz, amigável e de alta precisão.
 - Responda sempre em português fluente (a menos que o usuário solicite outro idioma).
 - Use formatação Markdown elegante e limpa: títulos, negrito, listas e blocos de código com a linguagem especificada.
-- Você possui capacidade total de ler, analisar e raciocinar sobre documentos (PDFs, planilhas, arquivos de texto e código) e imagens que forem fornecidos no histórico de mensagens.
+- Você possui capacidade total de ler, analisar e raciocinar sobre documentos (PDFs, planilhas, arquivos de texto e código), áudios e imagens que forem fornecidos no contexto.
 - Se forem fornecidos dados em tempo real da Web ou conteúdo de arquivos no histórico, incorpore essas informações diretamente em sua resposta de forma natural e precisa.
 - Seja proativo, direto e acolhedor, fornecendo soluções de nível sênior sem hesitação."""
 
     AVAILABLE_MODELS = {
+        "auto": {
+            "name": "✨ Auto (Roteamento Dinâmico)",
+            "provider": "Multi-Engine",
+            "description": "Escolhe e alterna automaticamente o melhor motor com auto-recuperação.",
+            "badge": "✨ Auto Engine"
+        },
         "deepseek": {
             "name": "⚡ DeepSeek V4/V3",
             "provider": "DeepSeek API",
-            "description": "Seu motor principal de programação, lógica e textos longos."
+            "description": "Seu motor principal de programação, lógica e textos longos.",
+            "badge": "⚡ DeepSeek V4"
         },
         "deepseek-r1": {
             "name": "🧠 DeepSeek R1 Oficial",
             "provider": "DeepSeek API",
-            "description": "Raciocínio lógico e matemático formal com encadeamento de pensamentos."
+            "description": "Raciocínio lógico e matemático formal com encadeamento de pensamentos.",
+            "badge": "🧠 DeepSeek R1"
         },
         "gemini": {
             "name": "⚡ Gemini 2.0 Flash",
             "provider": "Google (Grátis)",
-            "description": "Velocidade máxima, multimodal e contexto de 1 milhão de tokens."
+            "description": "Velocidade máxima, multimodal e contexto de 1 milhão de tokens.",
+            "badge": "⚡ Gemini 2.0 Flash"
         },
         "gemini-pro": {
             "name": "🌟 Gemini 1.5 Pro",
             "provider": "Google (Grátis)",
-            "description": "Análise aprofundada de documentos complexos e raciocínio multimodal."
+            "description": "Análise aprofundada de documentos complexos e raciocínio multimodal.",
+            "badge": "🌟 Gemini 1.5 Pro"
         },
         "groq-llama": {
             "name": "🚀 Llama 3.3 70B",
             "provider": "Groq Cloud (Grátis)",
-            "description": "Velocidade extrema de 300+ tokens/segundo em hardware LPU."
+            "description": "Velocidade extrema de 300+ tokens/segundo em hardware LPU.",
+            "badge": "🚀 Llama 3.3 70B"
         },
         "github-gpt4o": {
             "name": "🟢 GPT-4o Oficial",
             "provider": "GitHub Models (Grátis)",
-            "description": "O modelo principal da OpenAI oficial e gratuito via Azure/GitHub."
+            "description": "O modelo principal da OpenAI oficial e gratuito via Azure/GitHub.",
+            "badge": "🟢 GPT-4o"
         },
         "github-gpt4o-mini": {
             "name": "🟢 GPT-4o Mini",
             "provider": "GitHub Models (Grátis)",
-            "description": "Versão compacta, rápida e precisa do GPT-4o."
+            "description": "Versão compacta, rápida e precisa do GPT-4o.",
+            "badge": "🟢 GPT-4o Mini"
         }
     }
 
@@ -95,18 +108,35 @@ class LLMRouter:
         model_key: str,
         messages: list[dict],
         system_prompt: str | None = None
-    ) -> AsyncGenerator[tuple[str, str], None]:
-        """Gera resposta via streaming com proteção de Circuit Breaker e Fallback Chain."""
+    ) -> AsyncGenerator[Tuple[str, str, str, str], None]:
+        """
+        Gera resposta via streaming com proteção de Circuit Breaker, Fallback Transparente e Badges.
+        Retorna tupla: (texto_acumulado, raciocinio_acumulado, modelo_usado, aviso_fallback)
+        """
         sys_prompt = system_prompt or self.DEFAULT_SYSTEM_PROMPT
         
-        fallback_order = [model_key, "deepseek", "gemini", "groq-llama", "github-gpt4o"]
+        # Define ordem de tentativas
+        if model_key == "auto":
+            initial_target = "deepseek"
+            fallback_order = ["deepseek", "gemini", "groq-llama", "github-gpt4o"]
+        else:
+            initial_target = model_key
+            fallback_order = [model_key, "deepseek", "gemini", "groq-llama", "github-gpt4o"]
+            
         unique_order = list(dict.fromkeys(fallback_order))
-
         last_error = None
+
         for current_model in unique_order:
             if not circuit_breaker.is_available(current_model):
                 logger.info(f"Pulando modelo '{current_model}' (Circuit Breaker aberto).")
                 continue
+
+            # Gera aviso de fallback se não for o modelo solicitado
+            fallback_notice = ""
+            if model_key != "auto" and current_model != model_key:
+                req_name = self.AVAILABLE_MODELS.get(model_key, {}).get("name", model_key)
+                curr_name = self.AVAILABLE_MODELS.get(current_model, {}).get("name", current_model)
+                fallback_notice = f"⚡ _[{req_name} oscilou → Alternado automaticamente para {curr_name}]_"
 
             try:
                 # 1. DEEPSEEK (V4/V3 e R1 Oficial)
@@ -128,7 +158,7 @@ class LLMRouter:
                             accumulated_reasoning += delta.reasoning_content
                         if delta.content:
                             accumulated_content += delta.content
-                        yield accumulated_content, accumulated_reasoning
+                        yield accumulated_content, accumulated_reasoning, current_model, fallback_notice
                     
                     circuit_breaker.record_success(current_model)
                     return
@@ -154,7 +184,7 @@ class LLMRouter:
                     async for chunk in response:
                         if chunk.text:
                             accumulated += chunk.text
-                            yield accumulated, ""
+                            yield accumulated, "", current_model, fallback_notice
                     
                     circuit_breaker.record_success(current_model)
                     return
@@ -173,7 +203,7 @@ class LLMRouter:
                         delta = chunk.choices[0].delta
                         if delta.content:
                             accumulated += delta.content
-                            yield accumulated, ""
+                            yield accumulated, "", current_model, fallback_notice
                     
                     circuit_breaker.record_success(current_model)
                     return
@@ -194,7 +224,7 @@ class LLMRouter:
                         delta = chunk.choices[0].delta
                         if delta.content:
                             accumulated += delta.content
-                            yield accumulated, ""
+                            yield accumulated, "", current_model, fallback_notice
                     
                     circuit_breaker.record_success(current_model)
                     return
@@ -205,6 +235,6 @@ class LLMRouter:
                 last_error = e
                 continue
 
-        yield f"❌ Todos os provedores do Top 4 falharam ao responder. Erro final: {last_error}", ""
+        yield f"❌ Todos os motores de IA falharam temporariamente. Erro final: {last_error}", "", "error", ""
 
 llm_router = LLMRouter()

@@ -1,5 +1,5 @@
 """
-Text Message Handler with Live Streaming, Auto Web-Search Grounding, and Sleek Animated Indicators.
+Text Message Handler with Live Streaming, Auto Web-Search Grounding, and Model Footer Badges.
 """
 import asyncio
 import logging
@@ -26,23 +26,21 @@ async def keep_typing_alive(bot, chat_id: int, stop_event: asyncio.Event):
     try:
         while not stop_event.is_set():
             await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-            await asyncio.sleep(4)
+            await asyncio.sleep(3)
     except Exception:
         pass
 
 async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYPE, user_prompt: str, user_id: int):
-    """Executa a resposta ao vivo com auto-busca na web, streaming e animação moderna."""
+    """Executa a resposta ao vivo com auto-busca na web, streaming e rodapé com identificador de modelo."""
     user = await db.get_or_create_user(user_id)
     history = await db.get_context_history(user_id)
     selected_model = user["selected_model"]
     custom_sys = user.get("custom_system_prompt")
     chat_id = update.effective_chat.id
 
-    # Inicia animação de 'digitando...' em segundo plano
     stop_typing_event = asyncio.Event()
     typing_task = asyncio.create_task(keep_typing_alive(context.bot, chat_id, stop_typing_event))
 
-    # Indicador Amigável Inicial
     msg_status = await update.message.reply_text("✨ *Processando sua mensagem...*", parse_mode=ParseMode.MARKDOWN)
 
     # 1. Detecção Inteligente de Busca na Web (Auto Web Grounding)
@@ -65,14 +63,19 @@ async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYP
     last_update = time.time()
     accumulated_text = ""
     accumulated_reasoning = ""
+    actual_model_used = selected_model
+    fallback_alert = ""
 
     try:
-        async for text_chunk, reasoning_chunk in llm_router.stream_response(
+        async for text_chunk, reasoning_chunk, current_model, fb_notice in llm_router.stream_response(
             model_key=selected_model,
             messages=messages,
             system_prompt=custom_sys
         ):
             accumulated_text = text_chunk
+            actual_model_used = current_model
+            if fb_notice:
+                fallback_alert = fb_notice
             if reasoning_chunk:
                 accumulated_reasoning = reasoning_chunk
 
@@ -91,25 +94,32 @@ async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYP
                 except BadRequest:
                     pass
 
-        # Finalização da Mensagem Completa
         stop_typing_event.set()
         await typing_task
 
         if accumulated_text.strip():
-            # Salva no banco de dados SQLite
-            await db.save_message(user_id, "user", user_prompt, selected_model)
-            await db.save_message(user_id, "assistant", accumulated_text, selected_model)
-            await db.record_usage(user_id, "text", selected_model)
+            # Salva no histórico do banco SQLite
+            await db.save_message(user_id, "user", user_prompt, actual_model_used)
+            await db.save_message(user_id, "assistant", accumulated_text, actual_model_used)
+            await db.record_usage(user_id, "text", actual_model_used)
 
-            if len(accumulated_text) <= 4090:
+            # Formata o Rodapé Sutil com o Badge do Modelo
+            model_badge = llm_router.AVAILABLE_MODELS.get(actual_model_used, {}).get("badge", actual_model_used)
+            footer = f"\n\n▫️ _{model_badge}_"
+            if fallback_alert:
+                footer = f"\n\n{fallback_alert}\n▫️ _{model_badge}_"
+
+            final_text = accumulated_text.strip() + footer
+
+            if len(final_text) <= 4090:
                 try:
-                    await msg_status.edit_text(accumulated_text, parse_mode=ParseMode.MARKDOWN)
+                    await msg_status.edit_text(final_text, parse_mode=ParseMode.MARKDOWN)
                 except Exception:
-                    await msg_status.edit_text(accumulated_text)
+                    await msg_status.edit_text(final_text)
             else:
                 await msg_status.delete()
-                for i in range(0, len(accumulated_text), 4000):
-                    chunk = accumulated_text[i:i+4000]
+                for i in range(0, len(final_text), 4000):
+                    chunk = final_text[i:i+4000]
                     try:
                         await update.message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN)
                     except Exception:

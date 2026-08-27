@@ -1,5 +1,5 @@
 """
-Telegram Bot Command Handlers — Modern Executive Design System (v2.5).
+Telegram Bot Command Handlers — Modern Executive Design System with Auto Model Routing.
 """
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode, ChatAction
@@ -34,7 +34,6 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     model_info = llm_router.AVAILABLE_MODELS.get(user['selected_model'], {})
     model_name = model_info.get('name', user['selected_model'].upper())
 
-    # Layout de Botões Executivos
     keyboard = [
         [
             InlineKeyboardButton("⚡ Trocar Modelo de IA", callback_data="menu:modelos"),
@@ -84,6 +83,9 @@ async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [
+            InlineKeyboardButton("✨ Auto (Roteamento Dinâmico)", callback_data="set_model:auto"),
+        ],
+        [
             InlineKeyboardButton("⚡ DeepSeek V4/V3 (Código & Texto)", callback_data="set_model:deepseek"),
         ],
         [
@@ -108,7 +110,7 @@ async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "⚙️ *SELEÇÃO DE MOTOR DE INTELIGÊNCIA ARTIFICIAL*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "Selecione o modelo que você deseja ativar para suas conversas:"
+        "Selecione o modelo desejado ou use o modo **Auto** para gerência automática e fallback resiliente:"
     )
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
@@ -179,7 +181,7 @@ async def cmd_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.reply_photo(
             photo=url_img,
-            caption=f"🎨 *Prompt:* _{prompt}_",
+            caption=f"🎨 *Prompt:* _{prompt}_\n\n▫️ _Flux.1 HD_",
             parse_mode=ParseMode.MARKDOWN
         )
         await msg_wait.delete()
