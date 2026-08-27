@@ -1,24 +1,17 @@
 """
 Unified Multi-Provider LLM Router with Auto-Failover, Fallback Alerts, and Footer Badges.
 1. DeepSeek API (V4 / V3 & R1 Reasoner)
-2. Google Gemini (2.0 Flash & 1.5 Pro - Free Tier)
+2. Google Gemini (3.6 Flash - Free Tier)
 3. Groq Cloud (Llama 3.3 70B & DeepSeek R1 Distill - Free Tier)
 4. GitHub Models / Azure AI (Official GPT-4o & GPT-4o Mini - Free Tier)
 """
 from typing import AsyncGenerator, Tuple
 import logging
 from openai import AsyncOpenAI
-import google.generativeai as genai
 from app.config import settings
 from app.core.resilience import circuit_breaker
 
 logger = logging.getLogger(__name__)
-
-if settings.GEMINI_API_KEY:
-    try:
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-    except Exception as e:
-        logger.warning(f"Aviso na inicialização do Gemini: {e}")
 
 class LLMRouter:
     DEFAULT_SYSTEM_PROMPT = """Você é o BrainBot, um assistente de inteligência artificial de elite, versátil, ultra-rápido, perspicaz, amigável e de alta precisão.
@@ -48,16 +41,10 @@ class LLMRouter:
             "badge": "🧠 DeepSeek R1"
         },
         "gemini": {
-            "name": "⚡ Gemini 2.0 Flash",
-            "provider": "Google (Grátis)",
+            "name": "⚡ Gemini 3.6 Flash",
+            "provider": "Google AI (Grátis)",
             "description": "Velocidade máxima, multimodal e contexto de 1 milhão de tokens.",
-            "badge": "⚡ Gemini 2.0 Flash"
-        },
-        "gemini-pro": {
-            "name": "🌟 Gemini 1.5 Pro",
-            "provider": "Google (Grátis)",
-            "description": "Análise aprofundada de documentos complexos e raciocínio multimodal.",
-            "badge": "🌟 Gemini 1.5 Pro"
+            "badge": "⚡ Gemini 3.6 Flash"
         },
         "groq-llama": {
             "name": "🚀 Llama 3.3 70B",
@@ -86,22 +73,23 @@ class LLMRouter:
             base_url="https://api.deepseek.com"
         ) if settings.DEEPSEEK_API_KEY else None
 
-        # 2. Groq Client
+        # 2. Google Gemini Client (OpenAI-compatible)
+        self.client_gemini = AsyncOpenAI(
+            api_key=settings.GEMINI_API_KEY,
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+        ) if settings.GEMINI_API_KEY else None
+
+        # 3. Groq Client
         self.client_groq = AsyncOpenAI(
             api_key=settings.GROQ_API_KEY,
             base_url="https://api.groq.com/openai/v1"
         ) if settings.GROQ_API_KEY else None
 
-        # 3. GitHub Models (Azure AI)
+        # 4. GitHub Models (Azure AI)
         self.client_github = AsyncOpenAI(
             api_key=settings.GITHUB_TOKEN,
             base_url="https://models.inference.ai.azure.com"
         ) if settings.GITHUB_TOKEN else None
-
-        # 4. OpenAI Direct Client (Opcional)
-        self.client_openai = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY
-        ) if settings.OPENAI_API_KEY else None
 
     async def stream_response(
         self,
@@ -115,12 +103,9 @@ class LLMRouter:
         """
         sys_prompt = system_prompt or self.DEFAULT_SYSTEM_PROMPT
         
-        # Define ordem de tentativas
         if model_key == "auto":
-            initial_target = "deepseek"
             fallback_order = ["deepseek", "gemini", "groq-llama", "github-gpt4o"]
         else:
-            initial_target = model_key
             fallback_order = [model_key, "deepseek", "gemini", "groq-llama", "github-gpt4o"]
             
         unique_order = list(dict.fromkeys(fallback_order))
@@ -131,7 +116,6 @@ class LLMRouter:
                 logger.info(f"Pulando modelo '{current_model}' (Circuit Breaker aberto).")
                 continue
 
-            # Gera aviso de fallback se não for o modelo solicitado
             fallback_notice = ""
             if model_key != "auto" and current_model != model_key:
                 req_name = self.AVAILABLE_MODELS.get(model_key, {}).get("name", model_key)
@@ -163,28 +147,21 @@ class LLMRouter:
                     circuit_breaker.record_success(current_model)
                     return
 
-                # 2. GOOGLE GEMINI (2.0 Flash e 1.5 Pro - Grátis)
-                elif current_model in ("gemini", "gemini-pro") and settings.GEMINI_API_KEY:
-                    model_target = "gemini-2.0-flash" if current_model == "gemini" else "gemini-1.5-pro"
-                    model = genai.GenerativeModel(
-                        model_name=model_target,
-                        system_instruction=sys_prompt
+                # 2. GOOGLE GEMINI (3.6 Flash Oficial - Grátis)
+                elif current_model in ("gemini", "gemini-pro") and self.client_gemini:
+                    formatted_msgs = [{"role": "system", "content": sys_prompt}] + messages
+                    stream = await self.client_gemini.chat.completions.create(
+                        model="gemini-3.6-flash",
+                        messages=formatted_msgs,
+                        stream=True
                     )
                     
-                    history_gemini = []
-                    for m in messages[:-1]:
-                        role = "user" if m["role"] == "user" else "model"
-                        history_gemini.append({"role": role, "parts": [m["content"]]})
-                    
-                    chat = model.start_chat(history=history_gemini)
-                    last_user_msg = messages[-1]["content"] if messages else ""
-                    
-                    response = await chat.send_message_async(last_user_msg, stream=True)
-                    accumulated = ""
-                    async for chunk in response:
-                        if chunk.text:
-                            accumulated += chunk.text
-                            yield accumulated, "", current_model, fallback_notice
+                    accumulated_content = ""
+                    async for chunk in stream:
+                        delta = chunk.choices[0].delta
+                        if delta.content:
+                            accumulated_content += delta.content
+                            yield accumulated_content, "", current_model, fallback_notice
                     
                     circuit_breaker.record_success(current_model)
                     return

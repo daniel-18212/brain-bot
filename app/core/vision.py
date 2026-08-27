@@ -1,10 +1,10 @@
 """
-Multi-Modal Vision Analysis Module utilizing Free-Tier Gemini & Fallback Engines.
+Multi-Modal Vision Analysis Module utilizing High-Speed Gemini & Fallback Engines.
 """
 import io
+import base64
 import logging
 from PIL import Image
-import google.generativeai as genai
 from openai import AsyncOpenAI
 from app.config import settings
 
@@ -14,20 +14,38 @@ class VisionAnalyzer:
     async def analyze_image(self, image_bytes: io.BytesIO, prompt: str = "Descreva e analise detalhadamente esta imagem:") -> str:
         """Analisa a imagem enviada usando Gemini Flash (gratuito) com fallback para OpenAI."""
         
-        # 1. GOOGLE GEMINI FLASH (Melhor e Gratuito)
+        # 1. GOOGLE GEMINI FLASH (Alta Velocidade e Gratuito)
         if settings.GEMINI_API_KEY:
             try:
-                image = Image.open(image_bytes)
-                model = genai.GenerativeModel("gemini-2.0-flash")
-                response = await model.generate_content_async([prompt, image])
-                return response.text
+                image_bytes.seek(0)
+                base64_image = base64.b64encode(image_bytes.read()).decode("utf-8")
+                client = AsyncOpenAI(
+                    api_key=settings.GEMINI_API_KEY,
+                    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+                )
+                
+                res = await client.chat.completions.create(
+                    model="gemini-3.6-flash",
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                                }
+                            ]
+                        }
+                    ]
+                )
+                return res.choices[0].message.content
             except Exception as e:
                 logger.warning(f"Falha na visão via Gemini: {e}")
 
         # 2. OPENAI GPT-4o-mini (Fallback)
         if settings.OPENAI_API_KEY:
             try:
-                import base64
                 image_bytes.seek(0)
                 base64_image = base64.b64encode(image_bytes.read()).decode("utf-8")
                 client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
