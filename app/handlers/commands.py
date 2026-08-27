@@ -1,5 +1,5 @@
 """
-Telegram Bot Command Handlers — Full Enterprise Feature Suite with Client Onboarding & 1-Click Access.
+Telegram Bot Command Handlers — Distinct Customer Experience vs Master Admin Controls.
 """
 import asyncio
 import logging
@@ -74,7 +74,7 @@ async def show_unauthorized_card(update: Update, context: ContextTypes.DEFAULT_T
     await safe_reply(update, card_text, reply_markup=reply_markup)
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menu Principal Executivo do BrainBot."""
+    """Menu Principal: Visão Limpa para Clientes vs Visão Expandida para Admin."""
     user_id = update.effective_user.id
     if not await db.is_user_authorized(user_id):
         await show_unauthorized_card(update, context)
@@ -89,44 +89,47 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     model_info = llm_router.AVAILABLE_MODELS.get(user["selected_model"], {})
     model_name = model_info.get("name", user["selected_model"].upper())
     voice_status = "🔊 Ativo" if user.get("voice_mode_enabled") else "🔇 Desativado"
+    tier_label = user.get("tier", "free").upper()
 
+    # --- BOTÕES DO MENU PRINCIPAL (EXPERIÊNCIA DO CLIENTE) ---
     keyboard = [
         [
-            InlineKeyboardButton("⚡ Motores de IA", callback_data="menu:modelos"),
+            InlineKeyboardButton("🧹 Novo Chat (Limpar)", callback_data="menu:limpar"),
             InlineKeyboardButton("🎭 Especialistas GPTs", callback_data="menu:assistentes"),
         ],
         [
-            InlineKeyboardButton("🎙️ Modo Voz (TTS)", callback_data="menu:toggle_voice"),
+            InlineKeyboardButton("📄 Exportar Conversa (PDF)", callback_data="menu:exportar"),
+            InlineKeyboardButton("🎙️ Modo Voz", callback_data="menu:toggle_voice"),
+        ],
+        [
             InlineKeyboardButton("🧠 Minhas Memórias", callback_data="menu:memorias"),
-        ],
-        [
-            InlineKeyboardButton("📄 Exportar Chat (PDF)", callback_data="menu:exportar"),
-            InlineKeyboardButton("🧹 Novo Chat", callback_data="menu:limpar"),
-        ],
-        [
-            InlineKeyboardButton("📊 Telemetria & Status", callback_data="menu:status"),
             InlineKeyboardButton("🎨 Criar Imagem HD", callback_data="menu:img_help"),
+        ],
+        [
+            InlineKeyboardButton("📊 Minha Conta & Limites", callback_data="menu:status"),
+            InlineKeyboardButton("❓ Como Usar o Bot", callback_data="menu:ajuda"),
         ],
     ]
 
+    # --- BOTÕES EXCLUSIVOS DO MASTER ADMIN ---
     if is_admin(user_id):
         keyboard.append([
-            InlineKeyboardButton("🎛️ Master Admin Control", callback_data="admin:main")
+            InlineKeyboardButton("⚡ Trocar Motor de IA", callback_data="menu:modelos"),
+            InlineKeyboardButton("📢 Copy de Vendas (R$30)", callback_data="admin:marketing"),
         ])
-
-    keyboard.append([
-        InlineKeyboardButton("❓ Guia Completo de Comandos", callback_data="menu:ajuda")
-    ])
+        keyboard.append([
+            InlineKeyboardButton("🎛️ Master Admin Control Panel", callback_data="admin:main")
+        ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     menu_text = (
-        "✨ *BrainBot AI Enterprise* • `v3.0`\n"
+        "✨ *BrainBot AI Assistant*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         f"🤖 *Motor Ativo:* {model_name}\n"
-        f"🎙️ *Modo Voz:* `{voice_status}` | ⭐ *Plano:* `{user.get("tier", "free").upper()}`\n"
+        f"⭐ *Seu Plano:* `{tier_label}` | 🎙️ *Voz:* `{voice_status}`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Como posso te ajudar hoje? Escolha uma ação rápida abaixo ou converse diretamente no chat:"
+        "Como posso te ajudar hoje? Escolha uma opção abaixo ou digite sua pergunta diretamente no chat:"
     )
 
     await safe_reply(update, menu_text, reply_markup=reply_markup)
@@ -223,7 +226,7 @@ async def cmd_lembrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     memory_text = " ".join(context.args)
     if not memory_text:
-        await safe_reply(update, "ℹ️ *Uso:* `/lembrar eu uso Linux Mint e programo em Python e Rust`")
+        await safe_reply(update, "ℹ️ *Uso:* `/lembrar eu trabalho com contabilidade e uso Excel avançado`")
         return
 
     await db.add_memory(user_id, memory_text)
@@ -237,16 +240,16 @@ async def cmd_memorias(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     memories = await db.get_memories(user_id)
     if not memories:
-        text = "🧠 *Nenhuma memória personalizada salva ainda.*\n\nPara gravar algo, digite:\n`/lembrar [fato sobre você]`"
+        text = "🧠 *Nenhuma memória personalizada salva ainda.*\n\nPara gravar algo que a IA deve sempre lembrar, digite:\n`/lembrar [fato sobre você ou seu trabalho]`"
         back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
         await safe_reply(update, text, reply_markup=back_kb)
         return
 
-    lines = ["🧠 *MEMÓRIAS DE LONGO PRAZO SALVAS:*\n━━━━━━━━━━━━━━━━━━━━━"]
+    lines = ["🧠 *MINHAS MEMÓRIAS DE LONGO PRAZO SALVAS:*\n━━━━━━━━━━━━━━━━━━━━━"]
     for m in memories:
         lines.append(f"• `[ID {m["id"]}]` {m["memory_text"]}")
 
-    lines.append("\n_Para apagar tudo, use o botão abaixo:_")
+    lines.append("\n_Para apagar todas, clique no botão abaixo:_")
     keyboard = [
         [InlineKeyboardButton("🗑️ Apagar Todas as Memórias", callback_data="memories:clear_all")],
         [InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]
@@ -274,7 +277,7 @@ async def cmd_exportar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "📑 *EXPORTAÇÃO DO HISTÓRICO DA CONVERSA*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "Escolha o formato no qual deseja baixar todo o relatório da conversa atual:"
+        "Escolha o formato no qual deseja baixar todo o relatório da sua conversa atual:"
     )
     await safe_reply(update, text, reply_markup=reply_markup)
 
@@ -284,7 +287,7 @@ async def cmd_limpar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_unauthorized_card(update, context)
         return
     await db.clear_history(user_id)
-    text = "🧹 *Memória da conversa reiniciada!*\nUm novo chat limpo foi iniciado."
+    text = "🧹 *Memória da conversa reiniciada!*\nUm novo chat limpo foi iniciado para você."
     if update.callback_query:
         back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
         await safe_reply(update, text, reply_markup=back_kb)
@@ -292,6 +295,7 @@ async def cmd_limpar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply(update, text)
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Exibe status da conta do cliente ou telemetria completa para o admin."""
     user_id = update.effective_user.id
     if not await db.is_user_authorized(user_id):
         await show_unauthorized_card(update, context)
@@ -299,16 +303,32 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user = await db.get_or_create_user(user_id)
     model_info = llm_router.AVAILABLE_MODELS.get(user["selected_model"], {})
+    tier = user.get("tier", "free")
+    daily_count = user.get("daily_requests_count", 0)
+    max_quota = settings.TIER_QUOTAS.get(tier, 30)
 
-    status_text = (
-        "📊 *TELEMETRIA & STATUS DA SESSÃO*\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 *Motor Ativo:* {model_info.get("name", user["selected_model"])}\n"
-        f"🏢 *Provedor:* `{model_info.get("provider", "N/A")}`\n"
-        f"🎙️ *Modo Voz:* `{"Ativo" if user.get("voice_mode_enabled") else "Desativado"}`\n"
-        f"🔒 *Acesso:* `{settings.ACCESS_MODE}` | ⭐ *Plano:* `{user.get("tier", "free").upper()}`\n"
-        f"🩺 *Healthcheck:* `http://localhost:8080/health` (Healthy)"
-    )
+    if is_admin(user_id):
+        status_text = (
+            "📊 *TELEMETRIA & STATUS DO MASTER ADMIN*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 *Motor Ativo:* {model_info.get("name", user["selected_model"])}\n"
+            f"🏢 *Provedor:* `{model_info.get("provider", "N/A")}`\n"
+            f"🎙️ *Modo Voz:* `{"Ativo" if user.get("voice_mode_enabled") else "Desativado"}`\n"
+            f"👑 *Perfil:* `MASTER ADMIN (Ilimitado)`\n"
+            f"🔒 *Acesso Global:* `{settings.ACCESS_MODE}`\n"
+            f"🩺 *Healthcheck:* `http://localhost:8080/health` (Healthy)"
+        )
+    else:
+        quota_display = "Ilimitado" if tier == "unlimited" else f"{daily_count} de {max_quota} mensagens"
+        status_text = (
+            "📊 *STATUS DA SUA CONTA — BRAINBOT*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 *Cliente:* {user.get("first_name", "Visitante")}\n"
+            f"⭐ *Seu Plano:* `{tier.upper()}`\n"
+            f"💬 *Consumo Hoje:* `{quota_display}`\n"
+            f"🎙️ *Modo Voz:* `{"Ativo (Responde por áudio)" if user.get("voice_mode_enabled") else "Desativado (Texto)"}`\n"
+            f"🟢 *Status do Serviço:* `Online 24 Horas`"
+        )
     
     if update.callback_query:
         back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
@@ -342,7 +362,7 @@ async def cmd_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO)
-    msg_wait = await update.message.reply_text("🎨 *Renderizando imagem com Flux.1...*", parse_mode=ParseMode.MARKDOWN)
+    msg_wait = await update.message.reply_text("🎨 *Renderizando imagem em alta definição...*", parse_mode=ParseMode.MARKDOWN)
 
     url_img = image_generator.get_image_url(prompt)
     await db.record_usage(user_id, "image_gen")
@@ -350,7 +370,7 @@ async def cmd_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await update.message.reply_photo(
             photo=url_img,
-            caption=f"🎨 *Prompt:* _{prompt}_\n\n▫️ _Flux.1 HD_",
+            caption=f"🎨 *Prompt:* _{prompt}_\n\n▫️ _Flux.1 HD Engine_",
             parse_mode=ParseMode.MARKDOWN
         )
         await msg_wait.delete()
