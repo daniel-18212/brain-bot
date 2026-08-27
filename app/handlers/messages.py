@@ -1,5 +1,5 @@
 """
-Master Message Handler: Real-Time Streaming, Long-Term Memory, URL Scraper, Chart Execution, and Voice Synthesis.
+Master Message Handler: Real-Time Streaming, Client Quotas, Long-Term Memory, URL Scraper, Chart Execution, and Voice Synthesis.
 """
 import asyncio
 import logging
@@ -17,15 +17,9 @@ from app.core import (
     chart_generator,
     tts_engine
 )
+from app.handlers.commands import show_unauthorized_card
 
 logger = logging.getLogger(__name__)
-
-def is_authorized(user_id: int) -> bool:
-    if settings.ACCESS_MODE == "PRIVATE":
-        return user_id == settings.ADMIN_USER_ID
-    elif settings.ACCESS_MODE == "WHITELIST":
-        return user_id in settings.WHITELIST_USERS
-    return True
 
 async def keep_typing_alive(bot, chat_id: int, stop_event: asyncio.Event):
     """Mantém a indicação de 'digitando...' ativa no topo do chat do Telegram."""
@@ -43,7 +37,25 @@ async def stream_chat_response(
     user_id: int,
     is_voice_input: bool = False
 ):
-    """Executa a resposta completa com inteligência multi-camadas."""
+    """Executa a resposta completa com inteligência multi-camadas e cotas diárias de clientes."""
+    
+    # 0. Verificação de Autorização e Cotas de Uso
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
+
+    allowed, current_count, max_quota, tier = await db.check_and_increment_quota(user_id)
+    if not allowed:
+        quota_text = (
+            f"⚠️ *LIMITE DIÁRIO ATINGIDO*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"Você atingiu o limite de **{max_quota} mensagens diárias** do plano *{tier.upper()}*.\n\n"
+            f"• Sua cota será renovada automaticamente amanhã às 00:00.\n"
+            f"• Para migrar para o plano Pro ou VIP Ilimitado, converse com `{settings.ADMIN_CONTACT}`."
+        )
+        await update.message.reply_text(quota_text, parse_mode=ParseMode.MARKDOWN)
+        return
+
     user = await db.get_or_create_user(user_id)
     history = await db.get_context_history(user_id)
     selected_model = user["selected_model"]
@@ -54,7 +66,7 @@ async def stream_chat_response(
     memories = await db.get_memories(user_id)
     memory_context = ""
     if memories:
-        memory_lines = [f"- {m['memory_text']}" for m in memories]
+        memory_lines = [f"- {m["memory_text"]}" for m in memories]
         memory_context = "\n\n[MEMÓRIAS PERMANENTES E PREFERÊNCIAS SALVAS DO USUÁRIO]:\n" + "\n".join(memory_lines)
 
     full_system_prompt = (custom_sys or llm_router.DEFAULT_SYSTEM_PROMPT) + memory_context
@@ -203,7 +215,9 @@ async def stream_chat_response(
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
     
     text = update.message.text
     if not text: return

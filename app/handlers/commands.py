@@ -1,5 +1,5 @@
 """
-Telegram Bot Command Handlers — Full Enterprise Feature Suite (v3.0).
+Telegram Bot Command Handlers — Full Enterprise Feature Suite with Client Onboarding & 1-Click Access.
 """
 import asyncio
 import logging
@@ -17,13 +17,6 @@ from app.core import (
 )
 
 logger = logging.getLogger(__name__)
-
-def is_authorized(user_id: int) -> bool:
-    if settings.ACCESS_MODE == "PRIVATE":
-        return user_id == settings.ADMIN_USER_ID
-    elif settings.ACCESS_MODE == "WHITELIST":
-        return user_id in settings.WHITELIST_USERS
-    return True
 
 def is_admin(user_id: int) -> bool:
     return user_id == settings.ADMIN_USER_ID
@@ -48,11 +41,43 @@ async def safe_reply(update: Update, text: str, reply_markup=None, parse_mode=Pa
                     logger.error(f"Erro fatal ao enviar mensagem: {final_e}")
             await asyncio.sleep(0.5 * (attempt + 1))
 
+async def show_unauthorized_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Exibe o cartão executivo de solicitação de acesso para novos clientes."""
+    user = update.effective_user
+    user_id = user.id
+    first_name = user.first_name or "Visitante"
+
+    contact_user = settings.ADMIN_CONTACT.replace("@", "").strip()
+    contact_url = f"https://t.me/{contact_user}" if contact_user else "https://t.me"
+
+    keyboard = [
+        [
+            InlineKeyboardButton("📋 Solicitar Acesso Instantâneo", callback_data=f"req_access:{user_id}")
+        ],
+        [
+            InlineKeyboardButton("💬 Conversar com o Administrador", url=contact_url)
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    card_text = (
+        "🔒 *ACESSO EXCLUSIVO — BRAINBOT AI*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Olá, *{first_name}*! O BrainBot é um assistente corporativo de Inteligência Artificial de elite para uso privado e planos autorizados.\n\n"
+        "Para solicitar a liberação do seu acesso ou assinar um plano de uso:\n"
+        f"👤 *Administrador:* `{settings.ADMIN_CONTACT}`\n"
+        f"🆔 *Seu ID de Usuário:* `{user_id}`\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "Clique no botão abaixo para enviar sua solicitação diretamente ao administrador:"
+    )
+
+    await safe_reply(update, card_text, reply_markup=reply_markup)
+
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Menu Principal Executivo do BrainBot."""
     user_id = update.effective_user.id
-    if not is_authorized(user_id):
-        await safe_reply(update, "⛔ Acesso não autorizado a este servidor.")
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
         return
 
     user = await db.get_or_create_user(
@@ -61,8 +86,8 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         first_name=update.effective_user.first_name or ""
     )
 
-    model_info = llm_router.AVAILABLE_MODELS.get(user['selected_model'], {})
-    model_name = model_info.get('name', user['selected_model'].upper())
+    model_info = llm_router.AVAILABLE_MODELS.get(user["selected_model"], {})
+    model_name = model_info.get("name", user["selected_model"].upper())
     voice_status = "🔊 Ativo" if user.get("voice_mode_enabled") else "🔇 Desativado"
 
     keyboard = [
@@ -99,7 +124,7 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "✨ *BrainBot AI Enterprise* • `v3.0`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         f"🤖 *Motor Ativo:* {model_name}\n"
-        f"🎙️ *Modo Voz:* `{voice_status}` | ⭐ *Plano:* `{user.get('tier', 'free').upper()}`\n"
+        f"🎙️ *Modo Voz:* `{voice_status}` | ⭐ *Plano:* `{user.get("tier", "free").upper()}`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
         "Como posso te ajudar hoje? Escolha uma ação rápida abaixo ou converse diretamente no chat:"
     )
@@ -107,12 +132,17 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(update, menu_text, reply_markup=reply_markup)
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
     await cmd_menu(update, context)
 
 async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /modelos para alternar entre os motores do Top 4."""
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     keyboard = [
         [
@@ -147,9 +177,10 @@ async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(update, text, reply_markup=reply_markup)
 
 async def cmd_assistentes(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menu de Assistentes Especialistas (GPTs Prontos)."""
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     keyboard = [
         [InlineKeyboardButton("👨‍💻 Tech Lead & Arquiteto Sênior", callback_data="set_asst:dev_lead")],
@@ -170,9 +201,10 @@ async def cmd_assistentes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(update, text, reply_markup=reply_markup)
 
 async def cmd_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ativa ou desativa as respostas faladas em áudio (Text-to-Speech)."""
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     new_state = await db.toggle_voice_mode(user_id)
     state_str = "🔊 *Ativado!* A partir de agora o bot responderá com mensagens de voz." if new_state else "🔇 *Desativado!* O bot responderá apenas por texto."
@@ -184,9 +216,10 @@ async def cmd_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_reply(update, f"🎙️ **Modo de Voz:** {state_str}")
 
 async def cmd_lembrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Grava uma memória permanente de longo prazo sobre o usuário."""
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     memory_text = " ".join(context.args)
     if not memory_text:
@@ -197,9 +230,10 @@ async def cmd_lembrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(update, f"🧠 *Memória guardada com sucesso!*\n\n_\"{memory_text}\"_\n\nO BrainBot lembrará disso em todas as conversas futuras.")
 
 async def cmd_memorias(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Lista e gerencia memórias salvas do usuário."""
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     memories = await db.get_memories(user_id)
     if not memories:
@@ -210,7 +244,7 @@ async def cmd_memorias(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     lines = ["🧠 *MEMÓRIAS DE LONGO PRAZO SALVAS:*\n━━━━━━━━━━━━━━━━━━━━━"]
     for m in memories:
-        lines.append(f"• `[ID {m['id']}]` {m['memory_text']}")
+        lines.append(f"• `[ID {m["id"]}]` {m["memory_text"]}")
 
     lines.append("\n_Para apagar tudo, use o botão abaixo:_")
     keyboard = [
@@ -221,9 +255,10 @@ async def cmd_memorias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_reply(update, "\n".join(lines), reply_markup=reply_markup)
 
 async def cmd_exportar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menu para exportar histórico da conversa."""
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     keyboard = [
         [
@@ -245,7 +280,9 @@ async def cmd_exportar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_limpar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
     await db.clear_history(user_id)
     text = "🧹 *Memória da conversa reiniciada!*\nUm novo chat limpo foi iniciado."
     if update.callback_query:
@@ -256,18 +293,20 @@ async def cmd_limpar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     user = await db.get_or_create_user(user_id)
-    model_info = llm_router.AVAILABLE_MODELS.get(user['selected_model'], {})
+    model_info = llm_router.AVAILABLE_MODELS.get(user["selected_model"], {})
 
     status_text = (
         "📊 *TELEMETRIA & STATUS DA SESSÃO*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🤖 *Motor Ativo:* {model_info.get('name', user['selected_model'])}\n"
-        f"🏢 *Provedor:* `{model_info.get('provider', 'N/A')}`\n"
-        f"🎙️ *Modo Voz:* `{'Ativo' if user.get('voice_mode_enabled') else 'Desativado'}`\n"
-        f"🔒 *Acesso:* `{settings.ACCESS_MODE}` | ⭐ *Plano:* `{user.get('tier', 'free').upper()}`\n"
+        f"🤖 *Motor Ativo:* {model_info.get("name", user["selected_model"])}\n"
+        f"🏢 *Provedor:* `{model_info.get("provider", "N/A")}`\n"
+        f"🎙️ *Modo Voz:* `{"Ativo" if user.get("voice_mode_enabled") else "Desativado"}`\n"
+        f"🔒 *Acesso:* `{settings.ACCESS_MODE}` | ⭐ *Plano:* `{user.get("tier", "free").upper()}`\n"
         f"🩺 *Healthcheck:* `http://localhost:8080/health` (Healthy)"
     )
     
@@ -279,7 +318,9 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_web(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     query = " ".join(context.args)
     if not query:
@@ -291,7 +332,9 @@ async def cmd_web(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     prompt = " ".join(context.args)
     if not prompt:
@@ -316,7 +359,9 @@ async def cmd_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     custom_p = " ".join(context.args)
     if not custom_p:

@@ -1,6 +1,6 @@
 """
 Institutional-Grade Asynchronous SQLite Database Layer.
-Supports WAL Mode, Multi-Tenancy, Tier Quotas, Long-Term User Memories, and System Settings.
+Supports Multi-Tenancy, Client Onboarding, Tier Quotas, Long-Term Memories, and System Settings.
 """
 from datetime import datetime, date
 import logging
@@ -26,15 +26,15 @@ class Database:
             await db.execute("PRAGMA foreign_keys=ON;")
             await db.execute("PRAGMA busy_timeout=5000;")
 
-            # Tabela de Usuários
+            # Tabela de Usuários e Clientes
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
                     first_name TEXT,
-                    role TEXT DEFAULT 'user',
-                    status TEXT DEFAULT 'active',
-                    tier TEXT DEFAULT 'free',
+                    role TEXT DEFAULT 'user',          -- 'admin' ou 'user'
+                    status TEXT DEFAULT 'pending',     -- 'active', 'pending', 'banned'
+                    tier TEXT DEFAULT 'free',          -- 'free', 'pro', 'unlimited'
                     selected_model TEXT DEFAULT 'deepseek',
                     custom_system_prompt TEXT,
                     voice_mode_enabled INTEGER DEFAULT 0,
@@ -96,12 +96,12 @@ class Database:
             await db.execute("CREATE INDEX IF NOT EXISTS idx_usage_user_id ON usage_metrics(user_id, created_at);")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status, role);")
 
-            # Garante que o Admin Principal tenha role 'admin'
+            # Garante que o Admin Principal tenha role 'admin', status 'active' e tier 'unlimited'
             if settings.ADMIN_USER_ID:
                 await db.execute(
                     """
-                    INSERT INTO users (user_id, role, tier) VALUES (?, 'admin', 'unlimited')
-                    ON CONFLICT(user_id) DO UPDATE SET role = 'admin', tier = 'unlimited'
+                    INSERT INTO users (user_id, role, status, tier) VALUES (?, 'admin', 'active', 'unlimited')
+                    ON CONFLICT(user_id) DO UPDATE SET role = 'admin', status = 'active', tier = 'unlimited'
                     """,
                     (settings.ADMIN_USER_ID,)
                 )
@@ -109,7 +109,108 @@ class Database:
             await db.commit()
             logger.info(f"Institutional Database initialized at {self.db_path}")
 
-    # --- Operações de Usuário ---
+    # --- Operações de Autorização e Clientes ---
+
+    async def is_user_authorized(self, user_id: int) -> bool:
+        """Verifica se o usuário tem permissão para usar o bot de acordo com ACCESS_MODE."""
+        if user_id == settings.ADMIN_USER_ID:
+            return True
+
+        if settings.ACCESS_MODE == "PRIVATE":
+            return False
+
+        async with self.get_connection() as db:
+            async with db.execute("SELECT status FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    return False
+                status = row[0]
+                if settings.ACCESS_MODE == "WHITELIST":
+                    return status == "active"
+                elif settings.ACCESS_MODE == "PUBLIC":
+                    return status != "banned"
+        return False
+
+    async def request_user_access(self, user_id: int, username: str, first_name: str) -> dict:
+        """Registra a solicitação de acesso de um novo cliente em status 'pending'."""
+        today_str = str(date.today())
+        async with self.get_connection() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                if row:
+                    await db.execute(
+                        "UPDATE users SET username = ?, first_name = ?, last_active_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                        (username, first_name, user_id)
+                    )
+                    await db.commit()
+                    return dict(row)
+
+            await db.execute(
+                """
+                INSERT INTO users (user_id, username, first_name, role, status, tier, selected_model, last_request_date)
+                VALUES (?, ?, ?, 'user', 'pending', 'free', ?, ?)
+                """,
+                (user_id, username, first_name, settings.DEFAULT_MODEL, today_str)
+            )
+            await db.commit()
+            return {
+                "user_id": user_id,
+                "username": username,
+                "first_name": first_name,
+                "status": "pending",
+                "tier": "free"
+            }
+
+    async def approve_user_access(self, user_id: int, tier: str = "free") -> dict:
+        """Aprova o acesso de um cliente e define seu plano (free, pro, unlimited)."""
+        async with self.get_connection() as db:
+            await db.execute(
+                "UPDATE users SET status = 'active', tier = ?, last_active_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                (tier, user_id)
+            )
+            await db.commit()
+            return {"user_id": user_id, "status": "active", "tier": tier}
+
+    async def check_and_increment_quota(self, user_id: int) -> tuple[bool, int, int, str]:
+        """
+        Verifica a cota diária do usuário.
+        Retorna: (is_allowed, current_count, max_quota, tier)
+        """
+        if user_id == settings.ADMIN_USER_ID:
+            return True, 0, 999999, "unlimited"
+
+        today_str = str(date.today())
+        async with self.get_connection() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    return False, 0, 0, "free"
+
+                user = dict(row)
+                tier = user.get("tier", "free")
+                max_quota = settings.TIER_QUOTAS.get(tier, 30)
+
+                current_count = user.get("daily_requests_count", 0)
+                if user.get("last_request_date") != today_str:
+                    current_count = 0
+                    await db.execute(
+                        "UPDATE users SET daily_requests_count = 1, last_request_date = ? WHERE user_id = ?",
+                        (today_str, user_id)
+                    )
+                    await db.commit()
+                    return True, 1, max_quota, tier
+
+                if current_count >= max_quota:
+                    return False, current_count, max_quota, tier
+
+                await db.execute(
+                    "UPDATE users SET daily_requests_count = daily_requests_count + 1 WHERE user_id = ?",
+                    (user_id,)
+                )
+                await db.commit()
+                return True, current_count + 1, max_quota, tier
 
     async def get_or_create_user(self, user_id: int, username: str = "", first_name: str = "") -> dict:
         today_str = str(date.today())
@@ -133,16 +234,16 @@ class Database:
                     await db.commit()
                     return user_dict
 
-            # Cadastro de Novo Usuário
             role = "admin" if user_id == settings.ADMIN_USER_ID else "user"
+            status = "active" if role == "admin" else ("active" if settings.ACCESS_MODE == "PUBLIC" else "pending")
             tier = "unlimited" if role == "admin" else "free"
             
             await db.execute(
                 """
-                INSERT INTO users (user_id, username, first_name, role, tier, selected_model, last_request_date, voice_mode_enabled)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+                INSERT INTO users (user_id, username, first_name, role, status, tier, selected_model, last_request_date, voice_mode_enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
                 """,
-                (user_id, username, first_name, role, tier, settings.DEFAULT_MODEL, today_str)
+                (user_id, username, first_name, role, status, tier, settings.DEFAULT_MODEL, today_str)
             )
             await db.commit()
             return {
@@ -150,7 +251,7 @@ class Database:
                 "username": username,
                 "first_name": first_name,
                 "role": role,
-                "status": "active",
+                "status": status,
                 "tier": tier,
                 "selected_model": settings.DEFAULT_MODEL,
                 "custom_system_prompt": None,
@@ -158,15 +259,6 @@ class Database:
                 "daily_requests_count": 0,
                 "last_request_date": today_str
             }
-
-    async def increment_user_quota(self, user_id: int) -> None:
-        today_str = str(date.today())
-        async with self.get_connection() as db:
-            await db.execute(
-                "UPDATE users SET daily_requests_count = daily_requests_count + 1, last_request_date = ? WHERE user_id = ?",
-                (today_str, user_id)
-            )
-            await db.commit()
 
     async def update_user_model(self, user_id: int, model: str) -> None:
         async with self.get_connection() as db:
@@ -179,7 +271,6 @@ class Database:
             await db.commit()
 
     async def toggle_voice_mode(self, user_id: int) -> bool:
-        """Alterna o modo de resposta por voz (Text-to-Speech)."""
         async with self.get_connection() as db:
             async with db.execute("SELECT voice_mode_enabled FROM users WHERE user_id = ?", (user_id,)) as cursor:
                 row = await cursor.fetchone()
@@ -297,6 +388,8 @@ class Database:
                 total_users = (await c1.fetchone())[0]
             async with db.execute("SELECT COUNT(*) FROM users WHERE status = 'active'") as c2:
                 active_users = (await c2.fetchone())[0]
+            async with db.execute("SELECT COUNT(*) FROM users WHERE status = 'pending'") as cp:
+                pending_users = (await cp.fetchone())[0]
             async with db.execute("SELECT COUNT(*) FROM users WHERE tier = 'pro' OR tier = 'unlimited'") as c3:
                 pro_users = (await c3.fetchone())[0]
             async with db.execute("SELECT COUNT(*) FROM messages") as c4:
@@ -311,6 +404,7 @@ class Database:
             return {
                 "total_users": total_users,
                 "active_users": active_users,
+                "pending_users": pending_users,
                 "pro_users": pro_users,
                 "total_messages": total_messages,
                 "messages_today": messages_today,

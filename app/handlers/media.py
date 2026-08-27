@@ -1,5 +1,5 @@
 """
-Media Handlers: Photos (Vision), Audio/Voice Notes, and Documents (PDFs, Code).
+Media Handlers: Photos (Vision), Audio/Voice Notes, and Documents (PDFs, Code) with Client Quotas.
 """
 import io
 import logging
@@ -10,19 +10,20 @@ from app.config import settings
 from app.database import db
 from app.core import vision_analyzer, audio_transcriber, document_parser
 from app.handlers.messages import stream_chat_response
+from app.handlers.commands import show_unauthorized_card
 
 logger = logging.getLogger(__name__)
 
-def is_authorized(user_id: int) -> bool:
-    if settings.ACCESS_MODE == "PRIVATE":
-        return user_id == settings.ADMIN_USER_ID
-    elif settings.ACCESS_MODE == "WHITELIST":
-        return user_id in settings.WHITELIST_USERS
-    return True
-
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
+
+    allowed, current_count, max_quota, tier = await db.check_and_increment_quota(user_id)
+    if not allowed:
+        await update.message.reply_text(f"⚠️ Limite diário de {max_quota} mensagens atingido para o plano {tier.upper()}.", parse_mode=ParseMode.MARKDOWN)
+        return
 
     caption = update.message.caption or "Descreva e analise detalhadamente esta imagem:"
     photo = update.message.photo[-1]
@@ -42,14 +43,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.save_message(user_id, "user", f"[Foto enviada] {caption}")
         await db.save_message(user_id, "assistant", analysis)
 
-        await msg_status.edit_text(f"{analysis}\n\n▫️ _⚡ Gemini 3.6 Flash (Vision)_", parse_mode=ParseMode.MARKDOWN)
+        resp_text = f"{analysis}\n\n▫️ _⚡ Gemini 3.6 Flash (Vision)_"
+        await msg_status.edit_text(resp_text, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         logger.error(f"Erro no processamento de foto: {e}")
         await msg_status.edit_text(f"❌ Erro ao analisar imagem: `{e}`", parse_mode=ParseMode.MARKDOWN)
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     voice = update.message.voice or update.message.audio
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.RECORD_VOICE)
@@ -66,7 +70,6 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await msg_status.edit_text(f"🗣️ *Você disse:* _{transcription}_", parse_mode=ParseMode.MARKDOWN)
 
-        # Envia a transcrição para a IA responder por texto E voz
         await stream_chat_response(update, context, transcription, user_id, is_voice_input=True)
 
     except Exception as e:
@@ -75,7 +78,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if not is_authorized(user_id): return
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
 
     doc = update.message.document
     caption = update.message.caption or "Faça uma leitura completa e análise detalhada deste arquivo:"

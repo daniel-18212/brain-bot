@@ -1,10 +1,12 @@
 """
-Telegram Inline Button Callback Query Handlers with Complete Superpower Routing.
+Telegram Inline Button Callback Query Handlers with 1-Click Client Onboarding & Approval.
 """
+from datetime import datetime
 import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode, ChatAction
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
+from app.config import settings
 from app.database import db
 from app.core import (
     llm_router,
@@ -21,8 +23,122 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     data = query.data
 
+    # --- 0. Solicitação de Acesso por Novo Cliente ---
+    if data.startswith("req_access:"):
+        target_uid = int(data.split(":", 1)[1])
+        user = update.effective_user
+        first_name = user.first_name or "Visitante"
+        username = f"@{user.username}" if user.username else "Sem @username"
+
+        await db.request_user_access(target_uid, user.username or "", first_name)
+
+        # Atualiza a mensagem do cliente
+        msg_text = (
+            "⏳ *SOLICITAÇÃO DE ACESSO ENVIADA!*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Sua solicitação foi encaminhada diretamente ao administrador.\n"
+            "Assim que seu acesso for liberado, você receberá uma notificação aqui no chat."
+        )
+        await query.edit_message_text(msg_text, parse_mode=ParseMode.MARKDOWN)
+
+        # Notifica o Master Admin com Botões de 1 Clique
+        if settings.ADMIN_USER_ID:
+            now_str = datetime.now().strftime("%d/%m/%Y às %H:%M")
+            admin_msg = (
+                "🔔 *NOVA SOLICITAÇÃO DE ACESSO AO BRAINBOT!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                f"👤 *Nome:* {first_name}\n"
+                f"🏷️ *Usuário:* {username}\n"
+                f"🆔 *ID de Usuário:* `{target_uid}`\n"
+                f"📅 *Data:* {now_str}\n\n"
+                "Selecione o plano desejado para aprovar este cliente com 1 clique:"
+            )
+            admin_kb = InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton("🟢 Aprovar Free (30 msgs/dia)", callback_data=f"approve:{target_uid}:free"),
+                ],
+                [
+                    InlineKeyboardButton("💎 Aprovar Pro (200 msgs/dia)", callback_data=f"approve:{target_uid}:pro"),
+                ],
+                [
+                    InlineKeyboardButton("👑 Aprovar VIP Ilimitado", callback_data=f"approve:{target_uid}:unlimited"),
+                ],
+                [
+                    InlineKeyboardButton("❌ Recusar Solicitação", callback_data=f"reject:{target_uid}")
+                ]
+            ])
+            try:
+                await context.bot.send_message(
+                    chat_id=settings.ADMIN_USER_ID,
+                    text=admin_msg,
+                    reply_markup=admin_kb,
+                    parse_mode=ParseMode.MARKDOWN
+                )
+            except Exception as e:
+                logger.error(f"Falha ao notificar admin: {e}")
+        return
+
+    # --- 0.1 Aprovação pelo Master Admin ---
+    elif data.startswith("approve:"):
+        if user_id != settings.ADMIN_USER_ID:
+            await query.edit_message_text("⛔ Ação restrita ao Master Admin.")
+            return
+
+        parts = data.split(":")
+        target_uid = int(parts[1])
+        target_tier = parts[2]
+
+        await db.approve_user_access(target_uid, target_tier)
+        tier_names = {"free": "Free (30 msgs/dia)", "pro": "Pro (200 msgs/dia)", "unlimited": "VIP Ilimitado"}
+        tier_label = tier_names.get(target_tier, target_tier.upper())
+
+        # Atualiza a mensagem no chat do Admin
+        await query.edit_message_text(
+            f"✅ *ACESSO APROVADO COM SUCESSO!*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🆔 *ID:* `{target_uid}`\n"
+            f"⭐ *Plano Liberado:* `{tier_label}`\n"
+            f"Status atualizado para *ATIVO* no banco de dados.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        # Envia Mensagem de Boas-Vindas no Chat do Cliente
+        try:
+            client_welcome = (
+                "🎉 *PARABÉNS! SEU ACESSO FOI APROVADO!*\n"
+                "━━━━━━━━━━━━━━━━━━━━━\n"
+                f"O administrador liberou seu acesso ao *BrainBot AI*.\n"
+                f"⭐ *Seu Plano:* `{tier_label}`\n\n"
+                "Digite **/start** ou **/menu** para começar a utilizar seu assistente de IA agora mesmo!"
+            )
+            await context.bot.send_message(
+                chat_id=target_uid,
+                text=client_welcome,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        except Exception as e:
+            logger.warning(f"Não foi possível enviar mensagem ao cliente aprovado: {e}")
+        return
+
+    # --- 0.2 Recusa pelo Master Admin ---
+    elif data.startswith("reject:"):
+        if user_id != settings.ADMIN_USER_ID:
+            await query.edit_message_text("⛔ Ação restrita ao Master Admin.")
+            return
+
+        target_uid = int(data.split(":", 1)[1])
+        await db.set_user_status(target_uid, "banned")
+
+        await query.edit_message_text(
+            f"❌ *SOLICITAÇÃO RECUSADA!*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"O usuário ID `{target_uid}` teve sua solicitação recusada e permanece bloqueado.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        return
+
     # --- 1. Troca de Modelo de IA ---
-    if data.startswith("set_model:"):
+    elif data.startswith("set_model:"):
         model_key = data.split(":", 1)[1]
         model_info = llm_router.AVAILABLE_MODELS.get(model_key)
         
@@ -35,9 +151,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         confirmation = (
             "✅ *MOTOR DE IA ATIVADO COM SUCESSO!*\n"
             "━━━━━━━━━━━━━━━━━━━━━\n"
-            f"🤖 *Nome:* {model_info['name']}\n"
-            f"🏢 *Provedor:* `{model_info['provider']}`\n"
-            f"📝 *Foco:* _{model_info['description']}_"
+            f"🤖 *Nome:* {model_info["name"]}\n"
+            f"🏢 *Provedor:* `{model_info["provider"]}`\n"
+            f"📝 *Foco:* _{model_info["description"]}_"
         )
         back_kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔄 Escolher Outro Modelo", callback_data="menu:modelos")],
@@ -56,9 +172,9 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if asst:
                 await db.update_user_system_prompt(user_id, asst["system_prompt"])
                 text = (
-                    f"🎭 *PERFIL ATIVADO:* {asst['name']}\n"
+                    f"🎭 *PERFIL ATIVADO:* {asst["name"]}\n"
                     "━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"📝 *Especialidade:* _{asst['description']}_\n\n"
+                    f"📝 *Especialidade:* _{asst["description"]}_\n\n"
                     "O BrainBot agora responderá com esta persona especializada."
                 )
             else:
@@ -188,4 +304,4 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(text, reply_markup=back_kb, parse_mode=ParseMode.MARKDOWN)
 
 def register_callbacks(app: Application):
-    app.add_handler(CallbackQueryHandler(callback_router, pattern="^(set_model:|set_asst:|export:|memories:|menu:)"))
+    app.add_handler(CallbackQueryHandler(callback_router, pattern="^(req_access:|approve:|reject:|set_model:|set_asst:|export:|memories:|menu:)"))
