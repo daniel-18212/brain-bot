@@ -1,11 +1,12 @@
 """
-Institutional Application Entrypoint, Anti-Crash Supervisor, and Lifecycle Manager.
+Institutional Application Entrypoint, Anti-Crash Supervisor, and Resilient Connection Pool.
 """
 import asyncio
 import logging
 import signal
 import sys
 from telegram import BotCommand
+from telegram.request import HTTPXRequest
 from telegram.ext import ApplicationBuilder
 from app.config import settings
 from app.database import db
@@ -37,23 +38,22 @@ async def post_init(application) -> None:
 
     # Configura o Menu Nativo de Comandos no Telegram
     bot_commands = [
-        BotCommand("menu", "Menu Principal com todos os recursos"),
+        BotCommand("menu", "Menu Principal Interativo"),
         BotCommand("modelos", "Alternar Motor de IA"),
         BotCommand("limpar", "Novo Chat (Zerar Memória)"),
         BotCommand("web", "Pesquisa na Web em Tempo Real"),
         BotCommand("imagem", "Gerar Imagem HD (Flux.1)"),
         BotCommand("status", "Status da Sessão e Hardware"),
         BotCommand("prompt", "Personalizar Persona da IA"),
-        BotCommand("admin", "Painel de Controle Master (Admin)"),
-        BotCommand("ajuda", "Guia Completo de Comandos"),
+        BotCommand("admin", "Painel Master Admin"),
+        BotCommand("ajuda", "Guia de Recursos"),
     ]
     try:
         await application.bot.set_my_commands(bot_commands)
-        logger.info("📱 Menu nativo de comandos registrado com sucesso no Telegram.")
+        logger.info("📱 Menu nativo de comandos registrado no Telegram.")
     except Exception as e:
         logger.warning(f"Aviso ao registrar comandos nativos: {e}")
 
-    # Carrega configurações dinâmicas salvas no banco
     saved_mode = await db.get_system_setting("ACCESS_MODE", settings.ACCESS_MODE)
     settings.ACCESS_MODE = saved_mode
 
@@ -68,19 +68,29 @@ async def post_init(application) -> None:
 
 async def global_error_handler(update, context) -> None:
     """Supervisor Global de Exceções: Garante que o bot seja anticrash."""
-    logger.error(f"⚠️ [SUPERVISOR ANTICRASH] Exceção capturada no update {update}: {context.error}", exc_info=context.error)
+    logger.error(f"⚠️ [SUPERVISOR ANTICRASH] Exceção capturada: {context.error}")
 
 def main():
-    logger.info("Iniciando BrainBot em modo de alta disponibilidade...")
+    logger.info("Iniciando BrainBot com pool de conexões resiliente...")
     try:
         settings.validate()
     except ValueError as e:
         logger.error(f"❌ Falha de Inicialização: {e}")
         sys.exit(1)
 
+    # Pool de Conexões HTTPX de Alta Resiliência
+    request_pool = HTTPXRequest(
+        connection_pool_size=20,
+        read_timeout=30.0,
+        write_timeout=30.0,
+        connect_timeout=20.0,
+        pool_timeout=20.0
+    )
+
     app = (
         ApplicationBuilder()
         .token(settings.TELEGRAM_BOT_TOKEN)
+        .request(request_pool)
         .post_init(post_init)
         .concurrent_updates(True)
         .build()
@@ -93,7 +103,6 @@ def main():
     register_admin(app)
     register_messages(app)
 
-    # Supervisor Global de Falhas
     app.add_error_handler(global_error_handler)
 
     logger.info("Iniciando Long Polling com recuperação automática...")

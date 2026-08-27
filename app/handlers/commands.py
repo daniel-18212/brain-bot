@@ -1,12 +1,16 @@
 """
-Telegram Bot Command Handlers — Modern Executive Design System with Auto Model Routing.
+Telegram Bot Command Handlers — Resilient Delivery with Auto-Retry & Safe Fallbacks.
 """
+import asyncio
+import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode, ChatAction
 from telegram.ext import Application, CommandHandler, ContextTypes
 from app.config import settings
 from app.database import db
 from app.core import llm_router, web_search_engine, image_generator
+
+logger = logging.getLogger(__name__)
 
 def is_authorized(user_id: int) -> bool:
     if settings.ACCESS_MODE == "PRIVATE":
@@ -18,11 +22,32 @@ def is_authorized(user_id: int) -> bool:
 def is_admin(user_id: int) -> bool:
     return user_id == settings.ADMIN_USER_ID
 
+async def safe_reply(update: Update, text: str, reply_markup=None, parse_mode=ParseMode.MARKDOWN):
+    """Envia ou edita mensagem com tentativas automáticas e fallback de formatação."""
+    for attempt in range(3):
+        try:
+            if update.callback_query:
+                return await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+            else:
+                return await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        except Exception as e:
+            logger.warning(f"Tentativa {attempt+1} de envio falhou: {e}")
+            if attempt == 2:
+                # Falha final: tenta enviar sem formatação Markdown
+                try:
+                    if update.callback_query:
+                        return await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
+                    else:
+                        return await update.message.reply_text(text, reply_markup=reply_markup)
+                except Exception as final_e:
+                    logger.error(f"Erro fatal ao enviar mensagem: {final_e}")
+            await asyncio.sleep(0.5 * (attempt + 1))
+
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Menu Principal Executivo."""
     user_id = update.effective_user.id
     if not is_authorized(user_id):
-        await update.message.reply_text("⛔ Acesso não autorizado a este servidor.")
+        await safe_reply(update, "⛔ Acesso não autorizado a este servidor.")
         return
 
     user = await db.get_or_create_user(
@@ -66,18 +91,16 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🤖 *Motor Ativo:* {model_name}\n"
         f"🟢 *Status:* `Online 24/7` | ⭐ *Plano:* `{user.get('tier', 'free').upper()}`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Como posso te ajudar hoje? Escolha uma ação rápida abaixo ou simplesmente digite sua dúvida no chat:"
+        "Como posso te ajudar hoje? Escolha uma opção rápida abaixo ou digite sua pergunta diretamente no chat:"
     )
 
-    if update.callback_query:
-        await update.callback_query.edit_message_text(menu_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    else:
-        await update.message.reply_text(menu_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    await safe_reply(update, menu_text, reply_markup=reply_markup)
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await cmd_menu(update, context)
 
 async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /modelos para alternar entre os motores do Top 4."""
     user_id = update.effective_user.id
     if not is_authorized(user_id): return
 
@@ -92,14 +115,13 @@ async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🧠 DeepSeek R1 (Raciocínio Profundo)", callback_data="set_model:deepseek-r1"),
         ],
         [
-            InlineKeyboardButton("⚡ Gemini 2.0 Flash (Contexto 1M)", callback_data="set_model:gemini"),
-            InlineKeyboardButton("🌟 Gemini 1.5 Pro (Multimodal)", callback_data="set_model:gemini-pro"),
+            InlineKeyboardButton("⚡ Gemini 3.6 Flash (Google AI)", callback_data="set_model:gemini"),
         ],
         [
-            InlineKeyboardButton("🚀 Llama 3.3 70B (Groq 300+ tok/s)", callback_data="set_model:groq-llama"),
+            InlineKeyboardButton("🚀 GPT-OSS 120B (Groq 300+ tok/s)", callback_data="set_model:groq-llama"),
         ],
         [
-            InlineKeyboardButton("🟢 GPT-4o Oficial (GitHub Models)", callback_data="set_model:github-gpt4o"),
+            InlineKeyboardButton("🟢 GPT-4o Oficial (GitHub/Azure)", callback_data="set_model:github-gpt4o"),
         ],
         [
             InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")
@@ -110,23 +132,20 @@ async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "⚙️ *SELEÇÃO DE MOTOR DE INTELIGÊNCIA ARTIFICIAL*\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
-        "Selecione o modelo desejado ou use o modo **Auto** para gerência automática e fallback resiliente:"
+        "Selecione o motor desejado para suas conversas ou ative o modo **Auto** para balanceamento automático:"
     )
-    if update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
-    else:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    await safe_reply(update, text, reply_markup=reply_markup)
 
 async def cmd_limpar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_authorized(user_id): return
     await db.clear_history(user_id)
-    text = "🧹 *Memória da conversa reiniciada com sucesso!*\nUm novo chat limpo foi iniciado."
+    text = "🧹 *Memória da conversa reiniciada!*\nUm novo chat limpo foi iniciado."
     if update.callback_query:
         back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
-        await update.callback_query.edit_message_text(text, reply_markup=back_kb, parse_mode=ParseMode.MARKDOWN)
+        await safe_reply(update, text, reply_markup=back_kb)
     else:
-        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
+        await safe_reply(update, text)
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -147,9 +166,9 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if update.callback_query:
         back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
-        await update.callback_query.edit_message_text(status_text, reply_markup=back_kb, parse_mode=ParseMode.MARKDOWN)
+        await safe_reply(update, status_text, reply_markup=back_kb)
     else:
-        await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
+        await safe_reply(update, status_text)
 
 async def cmd_web(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -157,7 +176,7 @@ async def cmd_web(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = " ".join(context.args)
     if not query:
-        await update.message.reply_text("ℹ️ *Uso:* `/web últimas notícias sobre tecnologia`", parse_mode=ParseMode.MARKDOWN)
+        await safe_reply(update, "ℹ️ *Uso:* `/web últimas notícias sobre tecnologia`")
         return
 
     from app.handlers.messages import stream_chat_response
@@ -169,7 +188,7 @@ async def cmd_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     prompt = " ".join(context.args)
     if not prompt:
-        await update.message.reply_text("ℹ️ *Uso:* `/imagem um dragão mecânico futurista 8k`", parse_mode=ParseMode.MARKDOWN)
+        await safe_reply(update, "ℹ️ *Uso:* `/imagem um dragão mecânico futurista 8k`")
         return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO)
@@ -195,11 +214,11 @@ async def cmd_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     custom_p = " ".join(context.args)
     if not custom_p:
         await db.update_user_system_prompt(user_id, None)
-        await update.message.reply_text("🔄 Personalidade redefinida para o padrão.", parse_mode=ParseMode.MARKDOWN)
+        await safe_reply(update, "🔄 Personalidade redefinida para o padrão.")
         return
 
     await db.update_user_system_prompt(user_id, custom_p)
-    await update.message.reply_text(f"🎭 Personalidade atualizada:\n_{custom_p}_", parse_mode=ParseMode.MARKDOWN)
+    await safe_reply(update, f"🎭 Personalidade atualizada:\n_{custom_p}_")
 
 def register_commands(app: Application):
     app.add_handler(CommandHandler("menu", cmd_menu))
