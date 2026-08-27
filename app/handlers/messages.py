@@ -1,5 +1,5 @@
 """
-Text Message Handler with Live Streaming and Smart Context Management.
+Text Message Handler with Live Streaming, Auto Web-Search Grounding, and Sleek Animated Indicators.
 """
 import asyncio
 import logging
@@ -10,7 +10,7 @@ from telegram.error import BadRequest
 from telegram.ext import Application, MessageHandler, ContextTypes, filters
 from app.config import settings
 from app.database import db
-from app.core import llm_router
+from app.core import llm_router, web_search_engine
 
 logger = logging.getLogger(__name__)
 
@@ -21,22 +21,50 @@ def is_authorized(user_id: int) -> bool:
         return user_id in settings.WHITELIST_USERS
     return True
 
+async def keep_typing_alive(bot, chat_id: int, stop_event: asyncio.Event):
+    """Mantém a indicação de 'digitando...' ativa no topo do chat do Telegram."""
+    try:
+        while not stop_event.is_set():
+            await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            await asyncio.sleep(4)
+    except Exception:
+        pass
+
 async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYPE, user_prompt: str, user_id: int):
-    """Executa a resposta ao vivo com streaming e throttle inteligente."""
+    """Executa a resposta ao vivo com auto-busca na web, streaming e animação moderna."""
     user = await db.get_or_create_user(user_id)
     history = await db.get_context_history(user_id)
-    
-    # Monta a lista de mensagens para o roteador
-    messages = history + [{"role": "user", "content": user_prompt}]
-    
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-    msg_status = await update.message.reply_text("🤔 *Pensando...*", parse_mode=ParseMode.MARKDOWN)
+    selected_model = user["selected_model"]
+    custom_sys = user.get("custom_system_prompt")
+    chat_id = update.effective_chat.id
+
+    # Inicia animação de 'digitando...' em segundo plano
+    stop_typing_event = asyncio.Event()
+    typing_task = asyncio.create_task(keep_typing_alive(context.bot, chat_id, stop_typing_event))
+
+    # Indicador Amigável Inicial
+    msg_status = await update.message.reply_text("✨ *Processando sua mensagem...*", parse_mode=ParseMode.MARKDOWN)
+
+    # 1. Detecção Inteligente de Busca na Web (Auto Web Grounding)
+    final_prompt = user_prompt
+    if web_search_engine.should_trigger_search(user_prompt):
+        try:
+            await msg_status.edit_text("🌐 *Consultando a internet em tempo real...*", parse_mode=ParseMode.MARKDOWN)
+            web_data = await web_search_engine.search(user_prompt, max_results=4)
+            await db.record_usage(user_id, "web_search")
+            final_prompt = (
+                f"[DADOS EM TEMPO REAL DA WEB]:\n{web_data}\n\n"
+                f"[PERGUNTA DO USUÁRIO]:\n{user_prompt}\n\n"
+                "Responda à pergunta do usuário utilizando as informações mais recentes da web acima."
+            )
+        except Exception as e:
+            logger.warning(f"Falha na auto-busca web: {e}")
+
+    messages = history + [{"role": "user", "content": final_prompt}]
     
     last_update = time.time()
     accumulated_text = ""
     accumulated_reasoning = ""
-    selected_model = user["selected_model"]
-    custom_sys = user.get("custom_system_prompt")
 
     try:
         async for text_chunk, reasoning_chunk in llm_router.stream_response(
@@ -52,9 +80,8 @@ async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYP
             if now - last_update >= settings.STREAMING_THROTTLE_SECONDS and accumulated_text.strip():
                 display = accumulated_text
                 if accumulated_reasoning:
-                    display = f"💭 _Pensando:_\n`{accumulated_reasoning[-250:]}`\n\n{accumulated_text}"
+                    display = f"💭 _Raciocínio:_\n`{accumulated_reasoning[-200:]}`\n\n{accumulated_text}"
                 
-                # Trunca preview para não exceder 4000
                 if len(display) > 4000:
                     display = display[:3990] + "..."
 
@@ -65,13 +92,15 @@ async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYP
                     pass
 
         # Finalização da Mensagem Completa
+        stop_typing_event.set()
+        await typing_task
+
         if accumulated_text.strip():
             # Salva no banco de dados SQLite
             await db.save_message(user_id, "user", user_prompt, selected_model)
             await db.save_message(user_id, "assistant", accumulated_text, selected_model)
             await db.record_usage(user_id, "text", selected_model)
 
-            # Envia sem estourar limites de 4096 caracteres
             if len(accumulated_text) <= 4090:
                 try:
                     await msg_status.edit_text(accumulated_text, parse_mode=ParseMode.MARKDOWN)
@@ -87,8 +116,9 @@ async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYP
                         await update.message.reply_text(chunk)
 
     except Exception as e:
+        stop_typing_event.set()
         logger.error(f"Erro no processamento de texto: {e}")
-        await msg_status.edit_text(f"❌ Ocorreu um erro: `{e}`", parse_mode=ParseMode.MARKDOWN)
+        await msg_status.edit_text(f"❌ Ocorreu um erro ao processar sua resposta: `{e}`", parse_mode=ParseMode.MARKDOWN)
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id

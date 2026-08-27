@@ -1,5 +1,5 @@
 """
-Telegram Bot Command Handlers with Interactive /menu & Top 4 Elite Engines.
+Telegram Bot Command Handlers — Modern Executive Design System (v2.5).
 """
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode, ChatAction
@@ -19,7 +19,7 @@ def is_admin(user_id: int) -> bool:
     return user_id == settings.ADMIN_USER_ID
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menu Principal Interativo com Todas as Funcionalidades."""
+    """Menu Principal Executivo."""
     user_id = update.effective_user.id
     if not is_authorized(user_id):
         await update.message.reply_text("⛔ Acesso não autorizado a este servidor.")
@@ -34,41 +34,40 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     model_info = llm_router.AVAILABLE_MODELS.get(user['selected_model'], {})
     model_name = model_info.get('name', user['selected_model'].upper())
 
-    # Botões do Menu Interativo
+    # Layout de Botões Executivos
     keyboard = [
         [
-            InlineKeyboardButton("🔄 Alternar Modelo de IA", callback_data="menu:modelos"),
-            InlineKeyboardButton("🧹 Novo Chat (Limpar)", callback_data="menu:limpar"),
+            InlineKeyboardButton("⚡ Trocar Modelo de IA", callback_data="menu:modelos"),
+            InlineKeyboardButton("🧹 Novo Chat", callback_data="menu:limpar"),
         ],
         [
-            InlineKeyboardButton("🌐 Pesquisa na Web", callback_data="menu:web_help"),
-            InlineKeyboardButton("🎨 Gerar Imagem HD", callback_data="menu:img_help"),
+            InlineKeyboardButton("🌐 Busca na Web", callback_data="menu:web_help"),
+            InlineKeyboardButton("🎨 Criar Imagem HD", callback_data="menu:img_help"),
         ],
         [
-            InlineKeyboardButton("📊 Status & Estatísticas", callback_data="menu:status"),
+            InlineKeyboardButton("📊 Telemetria & Status", callback_data="menu:status"),
             InlineKeyboardButton("🎭 Personalizar Persona", callback_data="menu:prompt_help"),
         ],
     ]
 
-    # Adiciona botão de Admin se for o Administrador
     if is_admin(user_id):
         keyboard.append([
-            InlineKeyboardButton("🎛️ Painel Master Admin", callback_data="admin:main")
+            InlineKeyboardButton("🎛️ Master Admin Control", callback_data="admin:main")
         ])
 
     keyboard.append([
-        InlineKeyboardButton("❓ Guia Completo de Comandos", callback_data="menu:ajuda")
+        InlineKeyboardButton("❓ Guia de Recursos", callback_data="menu:ajuda")
     ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     menu_text = (
-        "╔════════════════════════════════════════╗\n"
-        "║       🧠 **BRAINBOT — MENU PRINCIPAL**       ║\n"
-        "╚════════════════════════════════════════╝\n\n"
-        f"🤖 **Modelo Ativo:** `{model_name}`\n"
-        f"⭐ **Seu Plano:** `{user.get('tier', 'free').upper()}`\n\n"
-        "Selecione uma ação no painel abaixo ou digite sua mensagem normalmente no chat:"
+        "✨ *BrainBot AI Assistant* • `v2.5`\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 *Motor Ativo:* {model_name}\n"
+        f"🟢 *Status:* `Online 24/7` | ⭐ *Plano:* `{user.get('tier', 'free').upper()}`\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Como posso te ajudar hoje? Escolha uma ação rápida abaixo ou simplesmente digite sua dúvida no chat:"
     )
 
     if update.callback_query:
@@ -85,19 +84,20 @@ async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [
-            InlineKeyboardButton("💡 DeepSeek V4/V3 (Código/Texto)", callback_data="set_model:deepseek"),
-            InlineKeyboardButton("🔬 DeepSeek R1 (Raciocínio)", callback_data="set_model:deepseek-r1"),
+            InlineKeyboardButton("⚡ DeepSeek V4/V3 (Código & Texto)", callback_data="set_model:deepseek"),
         ],
         [
-            InlineKeyboardButton("⚡ Gemini 2.0 Flash (Google Grátis)", callback_data="set_model:gemini"),
-            InlineKeyboardButton("🌟 Gemini 1.5 Pro (Google Grátis)", callback_data="set_model:gemini-pro"),
+            InlineKeyboardButton("🧠 DeepSeek R1 (Raciocínio Profundo)", callback_data="set_model:deepseek-r1"),
+        ],
+        [
+            InlineKeyboardButton("⚡ Gemini 2.0 Flash (Contexto 1M)", callback_data="set_model:gemini"),
+            InlineKeyboardButton("🌟 Gemini 1.5 Pro (Multimodal)", callback_data="set_model:gemini-pro"),
         ],
         [
             InlineKeyboardButton("🚀 Llama 3.3 70B (Groq 300+ tok/s)", callback_data="set_model:groq-llama"),
         ],
         [
             InlineKeyboardButton("🟢 GPT-4o Oficial (GitHub Models)", callback_data="set_model:github-gpt4o"),
-            InlineKeyboardButton("🟢 GPT-4o Mini (GitHub Models)", callback_data="set_model:github-gpt4o-mini"),
         ],
         [
             InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")
@@ -105,7 +105,11 @@ async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    text = "⚙️ *Selecione o motor de IA que você deseja utilizar agora:*"
+    text = (
+        "⚙️ *SELEÇÃO DE MOTOR DE INTELIGÊNCIA ARTIFICIAL*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "Selecione o modelo que você deseja ativar para suas conversas:"
+    )
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
     else:
@@ -115,7 +119,7 @@ async def cmd_limpar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_authorized(user_id): return
     await db.clear_history(user_id)
-    text = "🧹 *Memória da conversa reiniciada! Um novo chat foi iniciado.*"
+    text = "🧹 *Memória da conversa reiniciada com sucesso!*\nUm novo chat limpo foi iniciado."
     if update.callback_query:
         back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
         await update.callback_query.edit_message_text(text, reply_markup=back_kb, parse_mode=ParseMode.MARKDOWN)
@@ -130,12 +134,13 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     model_info = llm_router.AVAILABLE_MODELS.get(user['selected_model'], {})
 
     status_text = (
-        "📊 *STATUS DA SESSÃO & TELEMETRIA*\n\n"
-        f"🤖 *Modelo Ativo:* {model_info.get('name', user['selected_model'])}\n"
-        f"🏢 *Provedor:* {model_info.get('provider', 'N/A')}\n"
-        f"📝 *Especialidade:* _{model_info.get('description', '')}_\n"
-        f"🔑 *Modo de Acesso:* `{settings.ACCESS_MODE}`\n"
-        f"⭐ *Seu Plano:* `{user.get('tier', 'free').upper()}`"
+        "📊 *TELEMETRIA & STATUS DA SESSÃO*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 *Motor Ativo:* {model_info.get('name', user['selected_model'])}\n"
+        f"🏢 *Provedor:* `{model_info.get('provider', 'N/A')}`\n"
+        f"📝 *Foco:* _{model_info.get('description', '')}_\n"
+        f"🔒 *Acesso:* `{settings.ACCESS_MODE}` | ⭐ *Plano:* `{user.get('tier', 'free').upper()}`\n"
+        f"🩺 *Healthcheck:* `http://localhost:8080/health` (Healthy)"
     )
     
     if update.callback_query:
@@ -153,21 +158,8 @@ async def cmd_web(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("ℹ️ *Uso:* `/web últimas notícias sobre tecnologia`", parse_mode=ParseMode.MARKDOWN)
         return
 
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-    msg_wait = await update.message.reply_text("🔍 *Consultando a internet em tempo real...*", parse_mode=ParseMode.MARKDOWN)
-
-    results = await web_search_engine.search(query)
-    await db.record_usage(user_id, "web_search")
-    
-    prompt = (
-        f"Pergunta do usuário: '{query}'\n\n"
-        f"Resultados da busca web ao vivo:\n{results}\n\n"
-        "Com base nessas informações atualizadas, elabore uma resposta completa e estruturada."
-    )
-    await msg_wait.delete()
-
     from app.handlers.messages import stream_chat_response
-    await stream_chat_response(update, context, prompt, user_id)
+    await stream_chat_response(update, context, query, user_id)
 
 async def cmd_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id

@@ -25,10 +25,10 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(user_id): return
 
     caption = update.message.caption or "Analise esta imagem em detalhes e descreva o que observa:"
-    photo = update.message.photo[-1]  # Maior resolução disponível
+    photo = update.message.photo[-1]
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-    msg_status = await update.message.reply_text("👁️ *Analisando imagem com Visão Computacional...*", parse_mode=ParseMode.MARKDOWN)
+    msg_status = await update.message.reply_text("✨ *Analisando imagem com Visão Computacional...*", parse_mode=ParseMode.MARKDOWN)
 
     try:
         photo_file = await context.bot.get_file(photo.file_id)
@@ -39,7 +39,6 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         analysis = await vision_analyzer.analyze_image(buffer, prompt=caption)
         await db.record_usage(user_id, "vision")
         
-        # Salva o contexto
         await db.save_message(user_id, "user", f"[Foto enviada] {caption}")
         await db.save_message(user_id, "assistant", analysis)
 
@@ -79,10 +78,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_authorized(user_id): return
 
     doc = update.message.document
-    caption = update.message.caption or "Analise, resuma e extraia os pontos mais importantes deste arquivo:"
+    caption = update.message.caption or "Faça uma leitura completa e análise detalhada deste arquivo:"
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-    msg_status = await update.message.reply_text(f"📄 *Processando documento ({doc.file_name})...*", parse_mode=ParseMode.MARKDOWN)
+    msg_status = await update.message.reply_text(f"📄 *Processando e extraindo documento:* `{doc.file_name}`...", parse_mode=ParseMode.MARKDOWN)
 
     try:
         file = await context.bot.get_file(doc.file_id)
@@ -91,7 +90,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         extracted_text = document_parser.extract_text(file_bytes, doc.file_name)
         await db.record_usage(user_id, "document")
 
-        prompt = f"{caption}\n\n[ARQUIVO: {doc.file_name}]\n{extracted_text}"
+        prompt = (
+            f"[ARQUIVO ANEXADO PELO USUÁRIO: {doc.file_name}]\n\n"
+            f"{extracted_text}\n\n"
+            f"[SOLICITAÇÃO DO USUÁRIO]: {caption}"
+        )
         await msg_status.delete()
 
         await stream_chat_response(update, context, prompt, user_id)

@@ -1,5 +1,5 @@
 """
-Telegram Inline Button Callback Query Handlers with Complete Menu Routing.
+Telegram Inline Button Callback Query Handlers — Modern Executive Design System.
 """
 import logging
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -29,13 +29,14 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.update_user_model(user_id, model_key)
         
         confirmation = (
-            f"✅ **Modelo Ativado com Sucesso!**\n\n"
-            f"🤖 **Nome:** {model_info['name']}\n"
-            f"🏢 **Provedor:** {model_info['provider']}\n"
-            f"📝 **Detalhes:** _{model_info['description']}_"
+            "✅ *MOTOR DE IA ATIVADO COM SUCESSO!*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 *Nome:* {model_info['name']}\n"
+            f"🏢 *Provedor:* `{model_info['provider']}`\n"
+            f"📝 *Foco:* _{model_info['description']}_"
         )
         back_kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 Trocar Outro Modelo", callback_data="menu:modelos")],
+            [InlineKeyboardButton("🔄 Escolher Outro Modelo", callback_data="menu:modelos")],
             [InlineKeyboardButton("⬅️ Voltar ao Menu Principal", callback_data="menu:main")]
         ])
         await query.edit_message_text(confirmation, reply_markup=back_kb, parse_mode=ParseMode.MARKDOWN)
@@ -59,52 +60,59 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "menu:web_help":
         text = (
-            "🌐 **PESQUISA NA WEB AO VIVO**\n\n"
-            "O BrainBot é conectado diretamente à internet via DuckDuckGo.\n\n"
-            "📌 **Como Usar:**\n"
-            "Digite no chat:\n"
-            "`/web últimas notícias sobre inteligência artificial`\n\n"
-            "O bot fará a busca em tempo real, sintetizará os dados mais recentes e responderá com referências."
+            "🌐 *PESQUISA NA WEB INTELIGENTE (AUTOMÁTICA)*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "O BrainBot pesquisa a internet **automaticamente** sempre que você fizer perguntas sobre:\n"
+            "• Notícias recentes e acontecimentos de hoje\n"
+            "• Clima, temperatura e previsões\n"
+            "• Cotações (Dólar, Bitcoin, Ações)\n"
+            "• Lançamentos e atualizações\n\n"
+            "💡 *Você também pode forçar a busca digitando:*\n"
+            "`/web notícias de inteligência artificial`"
         )
         back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
         await query.edit_message_text(text, reply_markup=back_kb, parse_mode=ParseMode.MARKDOWN)
 
     elif data == "menu:img_help":
         text = (
-            "🎨 **GERAÇÃO DE IMAGENS EM ALTA DEFINIÇÃO**\n\n"
-            "O bot utiliza o modelo de última geração **Flux.1**.\n\n"
-            "📌 **Como Usar:**\n"
-            "Digite no chat:\n"
-            "`/imagem um astronauta explorando uma floresta alienígena em neon 8k`\n\n"
-            "A imagem será renderizada e enviada em alta resolução diretamente na conversa."
+            "🎨 *GERAÇÃO DE IMAGENS EM ALTA DEFINIÇÃO*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Renderização de última geração alimentada pelo modelo **Flux.1**.\n\n"
+            "📌 *Como Utilizar:*\n"
+            "Digite no chat a qualquer momento:\n"
+            "`/imagem um astronauta explorando uma floresta alienígena 8k`\n\n"
+            "A imagem será renderizada em 1024x1024 e enviada direto no chat."
         )
         back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
         await query.edit_message_text(text, reply_markup=back_kb, parse_mode=ParseMode.MARKDOWN)
 
     elif data == "menu:prompt_help":
         text = (
-            "🎭 **PERSONALIZAÇÃO DA PERSONA DA IA**\n\n"
-            "Você pode definir uma instrução personalizada para o assistente responder no estilo que você preferir.\n\n"
-            "📌 **Exemplos de Uso:**\n"
-            "• `/prompt Você é um programador sênior em Python e Rust, direto e técnico.`\n"
-            "• `/prompt Você é um consultor de negócios especialista em finanças.`\n"
-            "• `/prompt` (sem argumentos para voltar ao padrão)."
+            "🎭 *PERSONALIZAÇÃO DA PERSONA DA IA*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "Defina instruções personalizadas para o estilo de resposta do assistente.\n\n"
+            "📌 *Exemplos de Comandos:*\n"
+            "• `/prompt Você é um desenvolvedor sênior em Python e arquiteto de software, direto e técnico.`\n"
+            "• `/prompt Você é um consultor financeiro especialista em investimentos.`\n"
+            "• `/prompt` (envie sem texto para restaurar a persona padrão)."
         )
         back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
         await query.edit_message_text(text, reply_markup=back_kb, parse_mode=ParseMode.MARKDOWN)
 
     elif data == "menu:ajuda":
         text = (
-            "📖 **GUIA COMPLETO DE COMANDOS DO BRAINBOT**\n\n"
-            "• `/menu` - Abre o Menu Interativo Principal\n"
-            "• `/modelos` - Alterne entre DeepSeek V4, R1, Gemini, Groq e GPT-4o\n"
-            "• `/limpar` - Inicia um Novo Chat (limpa a memória recente)\n"
-            "• `/web <busca>` - Pesquisa notícias e fatos na internet ao vivo\n"
-            "• `/imagem <prompt>` - Cria imagens realistas com o Flux.1\n"
-            "• `/status` - Mostra modelo ativo e dados da sessão\n"
-            "• `/prompt <texto>` - Customiza a personalidade da IA\n"
-            "• `/admin` - Painel Master (Telemetria, Backup SQLite e Broadcast)\n\n"
-            "💡 **Dica Multimodal:** Envie fotos (para OCR/visão), áudios de voz (transcritos via Whisper) ou PDFs diretamente no chat."
+            "📖 *GUIA DE RECURSOS DO BRAINBOT*\n"
+            "━━━━━━━━━━━━━━━━━━━━━\n"
+            "• `/menu` — Abre o Menu Principal Interativo\n"
+            "• `/modelos` — Alterne entre DeepSeek V4, R1, Gemini, Groq e GPT-4o\n"
+            "• `/limpar` — Inicia um Novo Chat limpo\n"
+            "• `/web <busca>` — Pesquisa na internet com síntese em tempo real\n"
+            "• `/imagem <prompt>` — Gera ilustrações com o Flux.1\n"
+            "• `/status` — Exibe dados da sessão e telemetria\n"
+            "• `/prompt <texto>` — Ajusta a persona do assistente\n"
+            "• `/admin` — Painel Master (Telemetria, Backup SQLite e Broadcast)\n\n"
+            "💡 *Capacidades Multimodais Nativas:*\n"
+            "Envie **Áudios de voz** (transcrição Whisper instantânea), **Fotos** (leitura OCR/Visão) ou **PDFs/Documentos** diretamente no chat."
         )
         back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
         await query.edit_message_text(text, reply_markup=back_kb, parse_mode=ParseMode.MARKDOWN)

@@ -21,19 +21,21 @@ if settings.GEMINI_API_KEY:
         logger.warning(f"Aviso na inicialização do Gemini: {e}")
 
 class LLMRouter:
-    DEFAULT_SYSTEM_PROMPT = """Você é o BrainBot, um assistente de inteligência artificial de elite, versátil, ultra-rápido, perspicaz e prestativo.
-- Responda em português fluente (a menos que o usuário solicite outro idioma).
+    DEFAULT_SYSTEM_PROMPT = """Você é o BrainBot, um assistente de inteligência artificial de elite, versátil, ultra-rápido, perspicaz, amigável e de alta precisão.
+- Responda sempre em português fluente (a menos que o usuário solicite outro idioma).
 - Use formatação Markdown elegante e limpa: títulos, negrito, listas e blocos de código com a linguagem especificada.
-- Se for solicitado código, forneça soluções prontas para produção, bem comentadas e sem placeholders desnecessários."""
+- Você possui capacidade total de ler, analisar e raciocinar sobre documentos (PDFs, planilhas, arquivos de texto e código) e imagens que forem fornecidos no histórico de mensagens.
+- Se forem fornecidos dados em tempo real da Web ou conteúdo de arquivos no histórico, incorpore essas informações diretamente em sua resposta de forma natural e precisa.
+- Seja proativo, direto e acolhedor, fornecendo soluções de nível sênior sem hesitação."""
 
     AVAILABLE_MODELS = {
         "deepseek": {
-            "name": "💡 DeepSeek V4/V3",
+            "name": "⚡ DeepSeek V4/V3",
             "provider": "DeepSeek API",
             "description": "Seu motor principal de programação, lógica e textos longos."
         },
         "deepseek-r1": {
-            "name": "🔬 DeepSeek R1 Oficial",
+            "name": "🧠 DeepSeek R1 Oficial",
             "provider": "DeepSeek API",
             "description": "Raciocínio lógico e matemático formal com encadeamento de pensamentos."
         },
@@ -97,7 +99,6 @@ class LLMRouter:
         """Gera resposta via streaming com proteção de Circuit Breaker e Fallback Chain."""
         sys_prompt = system_prompt or self.DEFAULT_SYSTEM_PROMPT
         
-        # Cadeia de Fallback Estratégica (Top 4)
         fallback_order = [model_key, "deepseek", "gemini", "groq-llama", "github-gpt4o"]
         unique_order = list(dict.fromkeys(fallback_order))
 
