@@ -5,6 +5,7 @@ import asyncio
 import logging
 import signal
 import sys
+from telegram import BotCommand
 from telegram.ext import ApplicationBuilder
 from app.config import settings
 from app.database import db
@@ -17,7 +18,6 @@ from app.handlers import (
     register_admin
 )
 
-# Configuração de Logs Corporativos
 logging.basicConfig(
     format="%(asctime)s - [%(levelname)s] - %(name)s - %(message)s",
     level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
@@ -34,6 +34,24 @@ async def post_init(application) -> None:
     # Inicia o Servidor HTTP de Healthcheck na porta 8080
     health_port = int(getattr(settings, "HEALTH_PORT", 8080))
     await start_health_server(host="0.0.0.0", port=health_port)
+
+    # Configura o Menu Nativo de Comandos no Telegram
+    bot_commands = [
+        BotCommand("menu", "Menu Principal com todos os recursos"),
+        BotCommand("modelos", "Alternar Motor de IA"),
+        BotCommand("limpar", "Novo Chat (Zerar Memória)"),
+        BotCommand("web", "Pesquisa na Web em Tempo Real"),
+        BotCommand("imagem", "Gerar Imagem HD (Flux.1)"),
+        BotCommand("status", "Status da Sessão e Hardware"),
+        BotCommand("prompt", "Personalizar Persona da IA"),
+        BotCommand("admin", "Painel de Controle Master (Admin)"),
+        BotCommand("ajuda", "Guia Completo de Comandos"),
+    ]
+    try:
+        await application.bot.set_my_commands(bot_commands)
+        logger.info("📱 Menu nativo de comandos registrado com sucesso no Telegram.")
+    except Exception as e:
+        logger.warning(f"Aviso ao registrar comandos nativos: {e}")
 
     # Carrega configurações dinâmicas salvas no banco
     saved_mode = await db.get_system_setting("ACCESS_MODE", settings.ACCESS_MODE)

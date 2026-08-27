@@ -1,5 +1,5 @@
 """
-Telegram Bot Command Handlers (Top 4 Elite AI Engines).
+Telegram Bot Command Handlers with Interactive /menu & Top 4 Elite Engines.
 """
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode, ChatAction
@@ -15,7 +15,11 @@ def is_authorized(user_id: int) -> bool:
         return user_id in settings.WHITELIST_USERS
     return True
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def is_admin(user_id: int) -> bool:
+    return user_id == settings.ADMIN_USER_ID
+
+async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Menu Principal Interativo com Todas as Funcionalidades."""
     user_id = update.effective_user.id
     if not is_authorized(user_id):
         await update.message.reply_text("⛔ Acesso não autorizado a este servidor.")
@@ -27,20 +31,53 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         first_name=update.effective_user.first_name or ""
     )
 
-    welcome_text = (
-        f"👋 *Olá, {update.effective_user.first_name}! Bem-vindo ao BrainBot.*\n"
-        "Seu assistente institucional de IA conectado aos 4 motores mais avançados do mundo.\n\n"
-        "🤖 *Modelo Ativo:* `" + user['selected_model'].upper() + "`\n\n"
-        "📌 *Comandos Rápidos:*\n"
-        "• ⚙️ `/modelos` - Alternar entre DeepSeek, Gemini, Groq e GPT-4o\n"
-        "• 🌐 `/web <busca>` - Pesquisa ao vivo na internet\n"
-        "• 🎨 `/imagem <prompt>` - Gerar imagem em alta definição\n"
-        "• 🧹 `/limpar` - Reiniciar memória da conversa\n"
-        "• 📊 `/status` - Estatísticas de uso e telemetria\n"
-        "• 🎭 `/prompt <texto>` - Definir personalidade customizada\n\n"
-        "💡 *Recursos Nativos:* Você pode me enviar **Áudios de voz**, **Fotos/OCR**, **PDFs** ou **Códigos** diretamente no chat!"
+    model_info = llm_router.AVAILABLE_MODELS.get(user['selected_model'], {})
+    model_name = model_info.get('name', user['selected_model'].upper())
+
+    # Botões do Menu Interativo
+    keyboard = [
+        [
+            InlineKeyboardButton("🔄 Alternar Modelo de IA", callback_data="menu:modelos"),
+            InlineKeyboardButton("🧹 Novo Chat (Limpar)", callback_data="menu:limpar"),
+        ],
+        [
+            InlineKeyboardButton("🌐 Pesquisa na Web", callback_data="menu:web_help"),
+            InlineKeyboardButton("🎨 Gerar Imagem HD", callback_data="menu:img_help"),
+        ],
+        [
+            InlineKeyboardButton("📊 Status & Estatísticas", callback_data="menu:status"),
+            InlineKeyboardButton("🎭 Personalizar Persona", callback_data="menu:prompt_help"),
+        ],
+    ]
+
+    # Adiciona botão de Admin se for o Administrador
+    if is_admin(user_id):
+        keyboard.append([
+            InlineKeyboardButton("🎛️ Painel Master Admin", callback_data="admin:main")
+        ])
+
+    keyboard.append([
+        InlineKeyboardButton("❓ Guia Completo de Comandos", callback_data="menu:ajuda")
+    ])
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    menu_text = (
+        "╔════════════════════════════════════════╗\n"
+        "║       🧠 **BRAINBOT — MENU PRINCIPAL**       ║\n"
+        "╚════════════════════════════════════════╝\n\n"
+        f"🤖 **Modelo Ativo:** `{model_name}`\n"
+        f"⭐ **Seu Plano:** `{user.get('tier', 'free').upper()}`\n\n"
+        "Selecione uma ação no painel abaixo ou digite sua mensagem normalmente no chat:"
     )
-    await update.message.reply_text(welcome_text, parse_mode=ParseMode.MARKDOWN)
+
+    if update.callback_query:
+        await update.callback_query.edit_message_text(menu_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(menu_text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await cmd_menu(update, context)
 
 async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -62,19 +99,28 @@ async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("🟢 GPT-4o Oficial (GitHub Models)", callback_data="set_model:github-gpt4o"),
             InlineKeyboardButton("🟢 GPT-4o Mini (GitHub Models)", callback_data="set_model:github-gpt4o-mini"),
         ],
+        [
+            InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")
+        ]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "⚙️ *Selecione o motor de IA que você deseja utilizar:*",
-        reply_markup=reply_markup,
-        parse_mode=ParseMode.MARKDOWN
-    )
+    
+    text = "⚙️ *Selecione o motor de IA que você deseja utilizar agora:*"
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode=ParseMode.MARKDOWN)
 
 async def cmd_limpar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_authorized(user_id): return
     await db.clear_history(user_id)
-    await update.message.reply_text("🧹 *Memória da conversa reiniciada com sucesso!*", parse_mode=ParseMode.MARKDOWN)
+    text = "🧹 *Memória da conversa reiniciada! Um novo chat foi iniciado.*"
+    if update.callback_query:
+        back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
+        await update.callback_query.edit_message_text(text, reply_markup=back_kb, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -84,14 +130,19 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     model_info = llm_router.AVAILABLE_MODELS.get(user['selected_model'], {})
 
     status_text = (
-        "📊 *Status do Sistema & Métricas*\n\n"
+        "📊 *STATUS DA SESSÃO & TELEMETRIA*\n\n"
         f"🤖 *Modelo Ativo:* {model_info.get('name', user['selected_model'])}\n"
         f"🏢 *Provedor:* {model_info.get('provider', 'N/A')}\n"
-        f"📝 *Função:* _{model_info.get('description', '')}_\n"
+        f"📝 *Especialidade:* _{model_info.get('description', '')}_\n"
         f"🔑 *Modo de Acesso:* `{settings.ACCESS_MODE}`\n"
         f"⭐ *Seu Plano:* `{user.get('tier', 'free').upper()}`"
     )
-    await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
+    
+    if update.callback_query:
+        back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
+        await update.callback_query.edit_message_text(status_text, reply_markup=back_kb, parse_mode=ParseMode.MARKDOWN)
+    else:
+        await update.message.reply_text(status_text, parse_mode=ParseMode.MARKDOWN)
 
 async def cmd_web(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -157,9 +208,10 @@ async def cmd_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"🎭 Personalidade atualizada:\n_{custom_p}_", parse_mode=ParseMode.MARKDOWN)
 
 def register_commands(app: Application):
+    app.add_handler(CommandHandler("menu", cmd_menu))
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_start))
-    app.add_handler(CommandHandler("ajuda", cmd_start))
+    app.add_handler(CommandHandler("help", cmd_menu))
+    app.add_handler(CommandHandler("ajuda", cmd_menu))
     app.add_handler(CommandHandler("modelos", cmd_modelos))
     app.add_handler(CommandHandler("limpar", cmd_limpar))
     app.add_handler(CommandHandler("status", cmd_status))
