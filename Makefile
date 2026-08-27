@@ -1,21 +1,20 @@
-.PHONY: help install run-dev build up down logs clean docker-build
+.PHONY: help install run-dev build up down logs clean test
 
 help:
-	@echo "Comandos disponíveis:"
-	@echo "  make install    - Instala dependências no ambiente virtual"
+	@echo "Comandos disponíveis (Baseados em Astral UV & Docker):"
+	@echo "  make install    - Instala todas as dependências ultrarrápido com UV"
 	@echo "  make run-dev    - Executa o bot localmente em modo desenvolvimento"
-	@echo "  make build      - Constrói a imagem Docker"
-	@echo "  make up         - Inicia o container Docker em segundo plano"
-	@echo "  make down       - Para o container Docker"
-	@echo "  make logs       - Visualiza logs do container Docker em tempo real"
-	@echo "  make clean      - Remove arquivos temporários e caches"
+	@echo "  make build      - Constrói a imagem Docker de produção otimizada com UV"
+	@echo "  make up         - Inicia o container Docker em segundo plano (24/7)"
+	@echo "  make down       - Para o container Docker com desligamento seguro"
+	@echo "  make logs       - Visualiza os logs em tempo real do container"
+	@echo "  make clean      - Remove caches e arquivos temporários"
 
 install:
-	python3 -m pip install --upgrade pip
-	pip install -r requirements.txt
+	uv venv && uv pip install -r pyproject.toml
 
 run-dev:
-	python3 -m app.main
+	uv run python -m app.main
 
 build:
 	docker compose build

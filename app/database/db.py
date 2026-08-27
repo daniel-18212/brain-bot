@@ -1,7 +1,8 @@
 """
-Asynchronous SQLite Database Management Layer with WAL Mode and Schema Migrations.
+Institutional-Grade Asynchronous SQLite Database Layer.
+Supports WAL Mode, Multi-Tenancy, Tier Quotas, Live System Settings, and Audit Logs.
 """
-from datetime import datetime
+from datetime import datetime, date
 import logging
 from pathlib import Path
 import aiosqlite
@@ -19,24 +20,31 @@ class Database:
         await db.execute("PRAGMA journal_mode=WAL;")
         await db.execute("PRAGMA synchronous=NORMAL;")
         await db.execute("PRAGMA foreign_keys=ON;")
+        await db.execute("PRAGMA busy_timeout=5000;")
         return db
 
     async def init_db(self) -> None:
-        """Inicializa tabelas e índices necessários."""
+        """Inicializa esquema corporativo e tabelas de administração."""
         async with await self.get_connection() as db:
+            # Tabela de Usuários com Tier, Cotas e Status
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
                     first_name TEXT,
+                    role TEXT DEFAULT 'user',          -- 'admin' ou 'user'
+                    status TEXT DEFAULT 'active',      -- 'active', 'banned'
+                    tier TEXT DEFAULT 'free',          -- 'free', 'pro', 'unlimited'
                     selected_model TEXT DEFAULT 'gemini',
                     custom_system_prompt TEXT,
-                    tokens_used INTEGER DEFAULT 0,
-                    tier TEXT DEFAULT 'free',
+                    daily_requests_count INTEGER DEFAULT 0,
+                    last_request_date TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Tabela de Mensagens e Conversas
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,54 +56,108 @@ class Database:
                     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 )
             """)
+
+            # Métricas e Auditoria
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS usage_metrics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
-                    action_type TEXT NOT NULL,
+                    action_type TEXT NOT NULL,         -- 'text', 'vision', 'audio', 'web_search', 'image_gen'
                     model TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 )
             """)
-            # Índices para alta performance
+
+            # Configurações Dinâmicas do Sistema em Tempo de Execução
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Índices de Alta Performance
             await db.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id, id);")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_usage_user_id ON usage_metrics(user_id, created_at);")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status, role);")
+
+            # Garante que o Admin Principal tenha role 'admin'
+            if settings.ADMIN_USER_ID:
+                await db.execute(
+                    """
+                    INSERT INTO users (user_id, role, tier) VALUES (?, 'admin', 'unlimited')
+                    ON CONFLICT(user_id) DO UPDATE SET role = 'admin', tier = 'unlimited'
+                    """,
+                    (settings.ADMIN_USER_ID,)
+                )
+
             await db.commit()
-            logger.info(f"Database pronto e configurado em {self.db_path}")
+            logger.info(f"Institutional Database initialized at {self.db_path}")
+
+    # --- Operações de Usuário ---
 
     async def get_or_create_user(self, user_id: int, username: str = "", first_name: str = "") -> dict:
-        """Busca usuário existente ou cadastra novo."""
+        today_str = str(date.today())
         async with await self.get_connection() as db:
             db.row_factory = aiosqlite.Row
             async with db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cursor:
                 row = await cursor.fetchone()
                 if row:
+                    user_dict = dict(row)
+                    # Reset diário de cota se mudou o dia
+                    if user_dict.get("last_request_date") != today_str:
+                        await db.execute(
+                            "UPDATE users SET daily_requests_count = 0, last_request_date = ? WHERE user_id = ?",
+                            (today_str, user_id)
+                        )
+                        user_dict["daily_requests_count"] = 0
+                    
                     await db.execute(
                         "UPDATE users SET last_active_at = CURRENT_TIMESTAMP, username = ?, first_name = ? WHERE user_id = ?",
                         (username, first_name, user_id)
                     )
                     await db.commit()
-                    return dict(row)
+                    return user_dict
 
-            # Inserção de novo usuário
+            # Cadastro de Novo Usuário
+            role = "admin" if user_id == settings.ADMIN_USER_ID else "user"
+            tier = "unlimited" if role == "admin" else "free"
+            
             await db.execute(
                 """
-                INSERT INTO users (user_id, username, first_name, selected_model)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO users (user_id, username, first_name, role, tier, selected_model, last_request_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, username, first_name, settings.DEFAULT_MODEL)
+                (user_id, username, first_name, role, tier, settings.DEFAULT_MODEL, today_str)
             )
             await db.commit()
             return {
                 "user_id": user_id,
                 "username": username,
                 "first_name": first_name,
+                "role": role,
+                "status": "active",
+                "tier": tier,
                 "selected_model": settings.DEFAULT_MODEL,
                 "custom_system_prompt": None,
-                "tokens_used": 0,
-                "tier": "free"
+                "daily_requests_count": 0,
+                "last_request_date": today_str
             }
+
+    async def increment_user_quota(self, user_id: int) -> None:
+        today_str = str(date.today())
+        async with await self.get_connection() as db:
+            await db.execute(
+                """
+                UPDATE users 
+                SET daily_requests_count = daily_requests_count + 1, last_request_date = ?
+                WHERE user_id = ?
+                """,
+                (today_str, user_id)
+            )
+            await db.commit()
 
     async def update_user_model(self, user_id: int, model: str) -> None:
         async with await self.get_connection() as db:
@@ -106,6 +168,18 @@ class Database:
         async with await self.get_connection() as db:
             await db.execute("UPDATE users SET custom_system_prompt = ? WHERE user_id = ?", (prompt, user_id))
             await db.commit()
+
+    async def set_user_status(self, user_id: int, status: str) -> None:
+        async with await self.get_connection() as db:
+            await db.execute("UPDATE users SET status = ? WHERE user_id = ?", (status, user_id))
+            await db.commit()
+
+    async def set_user_tier(self, user_id: int, tier: str) -> None:
+        async with await self.get_connection() as db:
+            await db.execute("UPDATE users SET tier = ? WHERE user_id = ?", (tier, user_id))
+            await db.commit()
+
+    # --- Mensagens e Histórico ---
 
     async def save_message(self, user_id: int, role: str, content: str, model_used: str = "") -> None:
         async with await self.get_connection() as db:
@@ -135,6 +209,8 @@ class Database:
             await db.execute("DELETE FROM messages WHERE user_id = ?", (user_id,))
             await db.commit()
 
+    # --- Métricas e Administração ---
+
     async def record_usage(self, user_id: int, action_type: str, model: str = "") -> None:
         async with await self.get_connection() as db:
             await db.execute(
@@ -143,19 +219,74 @@ class Database:
             )
             await db.commit()
 
-    async def get_user_stats(self, user_id: int) -> dict:
+    async def get_admin_dashboard_stats(self) -> dict:
+        """Coleta estatísticas completas de negócio para o painel de controle do Telegram."""
         async with await self.get_connection() as db:
-            async with db.execute("SELECT COUNT(*) FROM messages WHERE user_id = ?", (user_id,)) as cur1:
-                total_messages = (await cur1.fetchone())[0]
-            async with db.execute("SELECT COUNT(*) FROM usage_metrics WHERE user_id = ? AND action_type = 'image_gen'", (user_id,)) as cur2:
-                total_images = (await cur2.fetchone())[0]
-            async with db.execute("SELECT COUNT(*) FROM usage_metrics WHERE user_id = ? AND action_type = 'web_search'", (user_id,)) as cur3:
-                total_searches = (await cur3.fetchone())[0]
-            
+            async with db.execute("SELECT COUNT(*) FROM users") as c1:
+                total_users = (await c1.fetchone())[0]
+            async with db.execute("SELECT COUNT(*) FROM users WHERE status = 'active'") as c2:
+                active_users = (await c2.fetchone())[0]
+            async with db.execute("SELECT COUNT(*) FROM users WHERE tier = 'pro' OR tier = 'unlimited'") as c3:
+                pro_users = (await c3.fetchone())[0]
+            async with db.execute("SELECT COUNT(*) FROM messages") as c4:
+                total_messages = (await c4.fetchone())[0]
+            async with db.execute("SELECT COUNT(*) FROM messages WHERE DATE(created_at) = DATE('now')") as c5:
+                messages_today = (await c5.fetchone())[0]
+            async with db.execute("SELECT COUNT(*) FROM usage_metrics WHERE action_type = 'image_gen'") as c6:
+                images_gen = (await c6.fetchone())[0]
+            async with db.execute("SELECT COUNT(*) FROM usage_metrics WHERE action_type = 'web_search'") as c7:
+                web_searches = (await c7.fetchone())[0]
+
             return {
+                "total_users": total_users,
+                "active_users": active_users,
+                "pro_users": pro_users,
                 "total_messages": total_messages,
-                "total_images": total_images,
-                "total_searches": total_searches
+                "messages_today": messages_today,
+                "images_gen": images_gen,
+                "web_searches": web_searches
             }
+
+    async def get_all_users_for_broadcast(self) -> list[int]:
+        """Retorna todos os IDs de usuários ativos para transmissão de mensagens."""
+        async with await self.get_connection() as db:
+            async with db.execute("SELECT user_id FROM users WHERE status = 'active'") as cursor:
+                rows = await cursor.fetchall()
+                return [r[0] for r in rows]
+
+    async def get_top_users(self, limit: int = 10) -> list[dict]:
+        async with await self.get_connection() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                """
+                SELECT u.user_id, u.username, u.first_name, u.tier, u.status, COUNT(m.id) as message_count
+                FROM users u
+                LEFT JOIN messages m ON u.user_id = m.user_id
+                GROUP BY u.user_id
+                ORDER BY message_count DESC
+                LIMIT ?
+                """,
+                (limit,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(r) for r in rows]
+
+    async def get_system_setting(self, key: str, default: str = "") -> str:
+        async with await self.get_connection() as db:
+            async with db.execute("SELECT value FROM system_settings WHERE key = ?", (key,)) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else default
+
+    async def set_system_setting(self, key: str, value: str) -> None:
+        async with await self.get_connection() as db:
+            await db.execute(
+                """
+                INSERT INTO system_settings (key, value, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+                """,
+                (key, value)
+            )
+            await db.commit()
 
 db = Database()

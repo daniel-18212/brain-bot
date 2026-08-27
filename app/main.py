@@ -1,7 +1,9 @@
 """
-Main Application Entrypoint and Lifecycle Manager.
+Institutional Application Entrypoint, Anti-Crash Supervisor, and Lifecycle Manager.
 """
+import asyncio
 import logging
+import signal
 import sys
 from telegram.ext import ApplicationBuilder
 from app.config import settings
@@ -10,10 +12,11 @@ from app.handlers import (
     register_commands,
     register_callbacks,
     register_messages,
-    register_media
+    register_media,
+    register_admin
 )
 
-# Configuração de Logs
+# Configuração de Logs Corporativos
 logging.basicConfig(
     format="%(asctime)s - [%(levelname)s] - %(name)s - %(message)s",
     level=getattr(logging, settings.LOG_LEVEL, logging.INFO),
@@ -21,26 +24,34 @@ logging.basicConfig(
         logging.StreamHandler(sys.stdout)
     ]
 )
-logger = logging.getLogger("BrainBot")
+logger = logging.getLogger("BrainBotMaster")
 
 async def post_init(application) -> None:
-    """Executado após a conexão inicial do bot com a API do Telegram."""
+    """Executado após conexão bem-sucedida com a infraestrutura do Telegram."""
     await db.init_db()
+    
+    # Carrega configurações dinâmicas salvas no banco
+    saved_mode = await db.get_system_setting("ACCESS_MODE", settings.ACCESS_MODE)
+    settings.ACCESS_MODE = saved_mode
+
     bot_info = await application.bot.get_me()
-    logger.info(f"🚀 BrainBot conectado com sucesso como @{bot_info.username} (ID: {bot_info.id})")
+    logger.info("=" * 60)
+    logger.info(f"🚀 BRAIN-BOT INSTITUCIONAL ONLINE: @{bot_info.username} (ID: {bot_info.id})")
     logger.info(f"🔒 Modo de Acesso Ativo: {settings.ACCESS_MODE}")
+    logger.info(f"👑 Master Admin ID: {settings.ADMIN_USER_ID}")
     logger.info(f"🧠 Modelo Padrão: {settings.DEFAULT_MODEL}")
+    logger.info("=" * 60)
 
 async def global_error_handler(update, context) -> None:
-    """Captura e registra exceções não tratadas sem derrubar o bot."""
-    logger.error(f"⚠️ Exceção não tratada ao processar update {update}: {context.error}", exc_info=context.error)
+    """Supervisor Global de Exceções: Garante que o bot seja anticrash."""
+    logger.error(f"⚠️ [SUPERVISOR ANTICRASH] Exceção capturada no update {update}: {context.error}", exc_info=context.error)
 
 def main():
-    logger.info("Iniciando BrainBot Enterprise...")
+    logger.info("Iniciando BrainBot em modo de alta disponibilidade...")
     try:
         settings.validate()
     except ValueError as e:
-        logger.error(f"Erro de Validação de Configurações: {e}")
+        logger.error(f"❌ Falha de Inicialização: {e}")
         sys.exit(1)
 
     app = (
@@ -51,16 +62,17 @@ def main():
         .build()
     )
 
-    # Registro de Handlers
+    # Registro de Todos os Controladores
     register_commands(app)
     register_callbacks(app)
     register_media(app)
+    register_admin(app)
     register_messages(app)
 
-    # Tratamento de Erros Global
+    # Supervisor Global de Falhas
     app.add_error_handler(global_error_handler)
 
-    # Inicia o Long Polling
+    logger.info("Iniciando Long Polling com recuperação automática...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
