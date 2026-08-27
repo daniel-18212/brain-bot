@@ -8,6 +8,7 @@ import sys
 from telegram.ext import ApplicationBuilder
 from app.config import settings
 from app.database import db
+from app.core.health import start_health_server
 from app.handlers import (
     register_commands,
     register_callbacks,
@@ -30,6 +31,10 @@ async def post_init(application) -> None:
     """Executado após conexão bem-sucedida com a infraestrutura do Telegram."""
     await db.init_db()
     
+    # Inicia o Servidor HTTP de Healthcheck na porta 8080
+    health_port = int(getattr(settings, "HEALTH_PORT", 8080))
+    await start_health_server(host="0.0.0.0", port=health_port)
+
     # Carrega configurações dinâmicas salvas no banco
     saved_mode = await db.get_system_setting("ACCESS_MODE", settings.ACCESS_MODE)
     settings.ACCESS_MODE = saved_mode
@@ -40,6 +45,7 @@ async def post_init(application) -> None:
     logger.info(f"🔒 Modo de Acesso Ativo: {settings.ACCESS_MODE}")
     logger.info(f"👑 Master Admin ID: {settings.ADMIN_USER_ID}")
     logger.info(f"🧠 Modelo Padrão: {settings.DEFAULT_MODEL}")
+    logger.info(f"🩺 Health Endpoint: http://0.0.0.0:{health_port}/health")
     logger.info("=" * 60)
 
 async def global_error_handler(update, context) -> None:

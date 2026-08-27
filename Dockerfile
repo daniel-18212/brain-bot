@@ -1,20 +1,19 @@
 # =====================================================================
-# Institutional Production Dockerfile with Astral UV (Ultra-Fast)
+# Institutional Production Dockerfile with Astral UV
 # =====================================================================
-FROM ghcr.io/astral-sh/uv:latest AS uv_bin
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Copia o binário UV do stage oficial
-COPY --from=uv_bin /uv /uvx /bin/
-
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
-    UV_SYSTEM_PYTHON=1
+    UV_SYSTEM_PYTHON=1 \
+    HEALTH_PORT=8080
 
-# Instalação ultrarrápida de dependências compiladas com UV
+# Instalação do UV e resolução ultrarrápida de dependências
+RUN pip install --no-cache-dir uv
+
 COPY pyproject.toml .
 RUN uv pip install -r pyproject.toml --system
 
@@ -28,6 +27,7 @@ COPY --chown=appuser:appgroup . /app
 
 USER appuser
 
+EXPOSE 8080
 VOLUME ["/app/data"]
 
 CMD ["python", "-m", "app.main"]
