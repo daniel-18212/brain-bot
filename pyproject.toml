@@ -1,7 +1,7 @@
 [project]
 name = "brain-bot"
-version = "2.0.0"
-description = "Institutional-Grade Multi-Model Telegram AI Assistant"
+version = "2.5.0"
+description = "Enterprise Multi-Model Telegram AI Assistant"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -19,6 +19,10 @@ dependencies = [
     "pydantic-settings>=2.5.0",
     "psutil>=6.0.0",
     "tenacity>=9.0.0",
+    "edge-tts>=6.1.12",
+    "beautifulsoup4>=4.12.3",
+    "fpdf2>=2.8.1",
+    "matplotlib>=3.9.0",
 ]
 
 [build-system]

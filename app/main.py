@@ -38,15 +38,20 @@ async def post_init(application) -> None:
 
     # Configura o Menu Nativo de Comandos no Telegram
     bot_commands = [
-        BotCommand("menu", "Menu Principal Interativo"),
-        BotCommand("modelos", "Alternar Motor de IA"),
+        BotCommand("menu", "Menu Principal com todos os recursos"),
+        BotCommand("modelos", "Alternar Motores de IA"),
+        BotCommand("assistentes", "Especialistas Profissionais (GPTs)"),
+        BotCommand("voz", "Ligar/Desligar Modo de Voz (Áudio)"),
+        BotCommand("lembrar", "Gravar memória de longo prazo"),
+        BotCommand("memorias", "Ver memórias salvas"),
+        BotCommand("exportar", "Baixar conversa em PDF/MD/TXT"),
         BotCommand("limpar", "Novo Chat (Zerar Memória)"),
-        BotCommand("web", "Pesquisa na Web em Tempo Real"),
+        BotCommand("web", "Pesquisa na Web ao Vivo"),
         BotCommand("imagem", "Gerar Imagem HD (Flux.1)"),
         BotCommand("status", "Status da Sessão e Hardware"),
         BotCommand("prompt", "Personalizar Persona da IA"),
         BotCommand("admin", "Painel Master Admin"),
-        BotCommand("ajuda", "Guia de Recursos"),
+        BotCommand("ajuda", "Guia Completo de Comandos"),
     ]
     try:
         await application.bot.set_my_commands(bot_commands)
@@ -59,7 +64,7 @@ async def post_init(application) -> None:
 
     bot_info = await application.bot.get_me()
     logger.info("=" * 60)
-    logger.info(f"🚀 BRAIN-BOT INSTITUCIONAL ONLINE: @{bot_info.username} (ID: {bot_info.id})")
+    logger.info(f"🚀 BRAIN-BOT ENTERPRISE ONLINE: @{bot_info.username} (ID: {bot_info.id})")
     logger.info(f"🔒 Modo de Acesso Ativo: {settings.ACCESS_MODE}")
     logger.info(f"👑 Master Admin ID: {settings.ADMIN_USER_ID}")
     logger.info(f"🧠 Modelo Padrão: {settings.DEFAULT_MODEL}")
@@ -71,14 +76,13 @@ async def global_error_handler(update, context) -> None:
     logger.error(f"⚠️ [SUPERVISOR ANTICRASH] Exceção capturada: {context.error}")
 
 def main():
-    logger.info("Iniciando BrainBot com pool de conexões resiliente...")
+    logger.info("Iniciando BrainBot Enterprise em modo de alta disponibilidade...")
     try:
         settings.validate()
     except ValueError as e:
         logger.error(f"❌ Falha de Inicialização: {e}")
         sys.exit(1)
 
-    # Pool de Conexões HTTPX de Alta Resiliência
     request_pool = HTTPXRequest(
         connection_pool_size=20,
         read_timeout=30.0,

@@ -24,7 +24,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_authorized(user_id): return
 
-    caption = update.message.caption or "Analise esta imagem em detalhes e descreva o que observa:"
+    caption = update.message.caption or "Descreva e analise detalhadamente esta imagem:"
     photo = update.message.photo[-1]
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
@@ -42,7 +42,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.save_message(user_id, "user", f"[Foto enviada] {caption}")
         await db.save_message(user_id, "assistant", analysis)
 
-        await msg_status.edit_text(analysis, parse_mode=ParseMode.MARKDOWN)
+        await msg_status.edit_text(f"{analysis}\n\n▫️ _⚡ Gemini 3.6 Flash (Vision)_", parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
         logger.error(f"Erro no processamento de foto: {e}")
         await msg_status.edit_text(f"❌ Erro ao analisar imagem: `{e}`", parse_mode=ParseMode.MARKDOWN)
@@ -66,8 +66,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await msg_status.edit_text(f"🗣️ *Você disse:* _{transcription}_", parse_mode=ParseMode.MARKDOWN)
 
-        # Envia a transcrição para a IA responder
-        await stream_chat_response(update, context, transcription, user_id)
+        # Envia a transcrição para a IA responder por texto E voz
+        await stream_chat_response(update, context, transcription, user_id, is_voice_input=True)
 
     except Exception as e:
         logger.error(f"Erro no áudio: {e}")

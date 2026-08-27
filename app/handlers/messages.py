@@ -1,5 +1,5 @@
 """
-Text Message Handler with Live Streaming, Auto Web-Search Grounding, and Model Footer Badges.
+Master Message Handler: Real-Time Streaming, Long-Term Memory, URL Scraper, Chart Execution, and Voice Synthesis.
 """
 import asyncio
 import logging
@@ -10,7 +10,13 @@ from telegram.error import BadRequest
 from telegram.ext import Application, MessageHandler, ContextTypes, filters
 from app.config import settings
 from app.database import db
-from app.core import llm_router, web_search_engine
+from app.core import (
+    llm_router,
+    web_search_engine,
+    url_reader,
+    chart_generator,
+    tts_engine
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,22 +36,53 @@ async def keep_typing_alive(bot, chat_id: int, stop_event: asyncio.Event):
     except Exception:
         pass
 
-async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYPE, user_prompt: str, user_id: int):
-    """Executa a resposta ao vivo com auto-busca na web, streaming e rodapé com identificador de modelo."""
+async def stream_chat_response(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    user_prompt: str,
+    user_id: int,
+    is_voice_input: bool = False
+):
+    """Executa a resposta completa com inteligência multi-camadas."""
     user = await db.get_or_create_user(user_id)
     history = await db.get_context_history(user_id)
     selected_model = user["selected_model"]
     custom_sys = user.get("custom_system_prompt")
     chat_id = update.effective_chat.id
 
+    # 1. Recupera Memórias Permanentes de Longo Prazo do Usuário
+    memories = await db.get_memories(user_id)
+    memory_context = ""
+    if memories:
+        memory_lines = [f"- {m['memory_text']}" for m in memories]
+        memory_context = "\n\n[MEMÓRIAS PERMANENTES E PREFERÊNCIAS SALVAS DO USUÁRIO]:\n" + "\n".join(memory_lines)
+
+    full_system_prompt = (custom_sys or llm_router.DEFAULT_SYSTEM_PROMPT) + memory_context
+
     stop_typing_event = asyncio.Event()
     typing_task = asyncio.create_task(keep_typing_alive(context.bot, chat_id, stop_typing_event))
 
     msg_status = await update.message.reply_text("✨ *Processando sua mensagem...*", parse_mode=ParseMode.MARKDOWN)
 
-    # 1. Detecção Inteligente de Busca na Web (Auto Web Grounding)
+    # 2. Detecção e Leitura Automática de Links / URLs
     final_prompt = user_prompt
-    if web_search_engine.should_trigger_search(user_prompt):
+    urls = url_reader.extract_urls(user_prompt)
+    if urls:
+        try:
+            target_url = urls[0]
+            await msg_status.edit_text(f"🔗 *Acessando e extraindo conteúdo da página:* `{target_url}`...", parse_mode=ParseMode.MARKDOWN)
+            page_text = await url_reader.fetch_page_content(target_url)
+            await db.record_usage(user_id, "url_read")
+            final_prompt = (
+                f"[CONTEÚDO DA PÁGINA WEB EXTRAÍDO]:\n{page_text}\n\n"
+                f"[SOLICITAÇÃO DO USUÁRIO]:\n{user_prompt}\n\n"
+                "Instrução: Analise as informações da página web extraída acima e elabore uma resposta estruturada."
+            )
+        except Exception as e:
+            logger.warning(f"Falha na leitura da URL: {e}")
+
+    # 3. Detecção Inteligente de Busca na Web (Auto Web Grounding)
+    elif web_search_engine.should_trigger_search(user_prompt):
         try:
             await msg_status.edit_text("🌐 *Consultando a internet em tempo real...*", parse_mode=ParseMode.MARKDOWN)
             web_data = await web_search_engine.search(user_prompt, max_results=4)
@@ -57,6 +94,15 @@ async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYP
             )
         except Exception as e:
             logger.warning(f"Falha na auto-busca web: {e}")
+
+    # 4. Detecção de Gráficos (Data Analysis)
+    is_chart_req = chart_generator.is_chart_request(user_prompt)
+    if is_chart_req:
+        final_prompt += (
+            "\n\n[INSTRUÇÃO IMPORTANTE]: Como o usuário solicitou um gráfico, inclua no final da sua resposta "
+            "um bloco de código Python executável usando exclusivamente a biblioteca `matplotlib.pyplot` (como `plt`), "
+            "sem placeholders, sem plt.show(), apenas com os dados e customização visual pronta."
+        )
 
     messages = history + [{"role": "user", "content": final_prompt}]
     
@@ -70,7 +116,7 @@ async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYP
         async for text_chunk, reasoning_chunk, current_model, fb_notice in llm_router.stream_response(
             model_key=selected_model,
             messages=messages,
-            system_prompt=custom_sys
+            system_prompt=full_system_prompt
         ):
             accumulated_text = text_chunk
             actual_model_used = current_model
@@ -98,12 +144,10 @@ async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYP
         await typing_task
 
         if accumulated_text.strip():
-            # Salva no histórico do banco SQLite
             await db.save_message(user_id, "user", user_prompt, actual_model_used)
             await db.save_message(user_id, "assistant", accumulated_text, actual_model_used)
             await db.record_usage(user_id, "text", actual_model_used)
 
-            # Formata o Rodapé Sutil com o Badge do Modelo
             model_badge = llm_router.AVAILABLE_MODELS.get(actual_model_used, {}).get("badge", actual_model_used)
             footer = f"\n\n▫️ _{model_badge}_"
             if fallback_alert:
@@ -125,9 +169,36 @@ async def stream_chat_response(update: Update, context: ContextTypes.DEFAULT_TYP
                     except Exception:
                         await update.message.reply_text(chunk)
 
+            # 5. Execução e Envio de Gráficos (se solicitado)
+            if is_chart_req and "plt." in accumulated_text:
+                try:
+                    chart_buf = chart_generator.extract_and_run_matplotlib(accumulated_text)
+                    if chart_buf:
+                        await update.message.reply_photo(
+                            photo=chart_buf,
+                            caption="📊 *Gráfico gerado com sucesso pelo BrainBot Data Engine*",
+                            parse_mode=ParseMode.MARKDOWN
+                        )
+                except Exception as chart_err:
+                    logger.warning(f"Falha ao gerar gráfico: {chart_err}")
+
+            # 6. Resposta Falada por Áudio (Text-to-Speech)
+            voice_enabled = await db.is_voice_mode_enabled(user_id)
+            if is_voice_input or voice_enabled:
+                try:
+                    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.RECORD_VOICE)
+                    voice_buffer = await tts_engine.generate_voice_bytes(accumulated_text)
+                    if voice_buffer:
+                        await update.message.reply_voice(
+                            voice=voice_buffer,
+                            caption="🎙️ *BrainBot Voice Response*"
+                        )
+                except Exception as tts_err:
+                    logger.warning(f"Falha no envio de voz TTS: {tts_err}")
+
     except Exception as e:
         stop_typing_event.set()
-        logger.error(f"Erro no processamento de texto: {e}")
+        logger.error(f"Erro no processamento de mensagem: {e}")
         await msg_status.edit_text(f"❌ Ocorreu um erro ao processar sua resposta: `{e}`", parse_mode=ParseMode.MARKDOWN)
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):

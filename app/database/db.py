@@ -1,6 +1,6 @@
 """
 Institutional-Grade Asynchronous SQLite Database Layer.
-Supports WAL Mode, Multi-Tenancy, Tier Quotas, Live System Settings, and Audit Logs.
+Supports WAL Mode, Multi-Tenancy, Tier Quotas, Long-Term User Memories, and System Settings.
 """
 from datetime import datetime, date
 import logging
@@ -26,17 +26,18 @@ class Database:
             await db.execute("PRAGMA foreign_keys=ON;")
             await db.execute("PRAGMA busy_timeout=5000;")
 
-            # Tabela de Usuários com Tier, Cotas e Status
+            # Tabela de Usuários
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     user_id INTEGER PRIMARY KEY,
                     username TEXT,
                     first_name TEXT,
-                    role TEXT DEFAULT 'user',          -- 'admin' ou 'user'
-                    status TEXT DEFAULT 'active',      -- 'active', 'banned'
-                    tier TEXT DEFAULT 'free',          -- 'free', 'pro', 'unlimited'
+                    role TEXT DEFAULT 'user',
+                    status TEXT DEFAULT 'active',
+                    tier TEXT DEFAULT 'free',
                     selected_model TEXT DEFAULT 'deepseek',
                     custom_system_prompt TEXT,
+                    voice_mode_enabled INTEGER DEFAULT 0,
                     daily_requests_count INTEGER DEFAULT 0,
                     last_request_date TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -44,7 +45,18 @@ class Database:
                 )
             """)
 
-            # Tabela de Mensagens e Conversas
+            # Tabela de Memórias Permanentes de Longo Prazo
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS user_memories (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    memory_text TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+                )
+            """)
+
+            # Tabela de Mensagens
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,14 +74,14 @@ class Database:
                 CREATE TABLE IF NOT EXISTS usage_metrics (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     user_id INTEGER NOT NULL,
-                    action_type TEXT NOT NULL,         -- 'text', 'vision', 'audio', 'web_search', 'image_gen'
+                    action_type TEXT NOT NULL,
                     model TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
                 )
             """)
 
-            # Configurações Dinâmicas do Sistema em Tempo de Execução
+            # Configurações Dinâmicas do Sistema
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS system_settings (
                     key TEXT PRIMARY KEY,
@@ -80,6 +92,7 @@ class Database:
 
             # Índices de Alta Performance
             await db.execute("CREATE INDEX IF NOT EXISTS idx_messages_user_id ON messages(user_id, id);")
+            await db.execute("CREATE INDEX IF NOT EXISTS idx_memories_user_id ON user_memories(user_id);")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_usage_user_id ON usage_metrics(user_id, created_at);")
             await db.execute("CREATE INDEX IF NOT EXISTS idx_users_status ON users(status, role);")
 
@@ -106,7 +119,6 @@ class Database:
                 row = await cursor.fetchone()
                 if row:
                     user_dict = dict(row)
-                    # Reset diário de cota se mudou o dia
                     if user_dict.get("last_request_date") != today_str:
                         await db.execute(
                             "UPDATE users SET daily_requests_count = 0, last_request_date = ? WHERE user_id = ?",
@@ -127,8 +139,8 @@ class Database:
             
             await db.execute(
                 """
-                INSERT INTO users (user_id, username, first_name, role, tier, selected_model, last_request_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO users (user_id, username, first_name, role, tier, selected_model, last_request_date, voice_mode_enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 0)
                 """,
                 (user_id, username, first_name, role, tier, settings.DEFAULT_MODEL, today_str)
             )
@@ -142,6 +154,7 @@ class Database:
                 "tier": tier,
                 "selected_model": settings.DEFAULT_MODEL,
                 "custom_system_prompt": None,
+                "voice_mode_enabled": 0,
                 "daily_requests_count": 0,
                 "last_request_date": today_str
             }
@@ -150,11 +163,7 @@ class Database:
         today_str = str(date.today())
         async with self.get_connection() as db:
             await db.execute(
-                """
-                UPDATE users 
-                SET daily_requests_count = daily_requests_count + 1, last_request_date = ?
-                WHERE user_id = ?
-                """,
+                "UPDATE users SET daily_requests_count = daily_requests_count + 1, last_request_date = ? WHERE user_id = ?",
                 (today_str, user_id)
             )
             await db.commit()
@@ -169,6 +178,24 @@ class Database:
             await db.execute("UPDATE users SET custom_system_prompt = ? WHERE user_id = ?", (prompt, user_id))
             await db.commit()
 
+    async def toggle_voice_mode(self, user_id: int) -> bool:
+        """Alterna o modo de resposta por voz (Text-to-Speech)."""
+        async with self.get_connection() as db:
+            async with db.execute("SELECT voice_mode_enabled FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                current = row[0] if row and row[0] is not None else 0
+                new_state = 1 if current == 0 else 0
+            
+            await db.execute("UPDATE users SET voice_mode_enabled = ? WHERE user_id = ?", (new_state, user_id))
+            await db.commit()
+            return bool(new_state)
+
+    async def is_voice_mode_enabled(self, user_id: int) -> bool:
+        async with self.get_connection() as db:
+            async with db.execute("SELECT voice_mode_enabled FROM users WHERE user_id = ?", (user_id,)) as cursor:
+                row = await cursor.fetchone()
+                return bool(row[0]) if row and row[0] is not None else False
+
     async def set_user_status(self, user_id: int, status: str) -> None:
         async with self.get_connection() as db:
             await db.execute("UPDATE users SET status = ? WHERE user_id = ?", (status, user_id))
@@ -177,6 +204,41 @@ class Database:
     async def set_user_tier(self, user_id: int, tier: str) -> None:
         async with self.get_connection() as db:
             await db.execute("UPDATE users SET tier = ? WHERE user_id = ?", (tier, user_id))
+            await db.commit()
+
+    # --- Memórias de Longo Prazo ---
+
+    async def add_memory(self, user_id: int, memory_text: str) -> int:
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                "INSERT INTO user_memories (user_id, memory_text) VALUES (?, ?)",
+                (user_id, memory_text.strip())
+            )
+            await db.commit()
+            return cursor.lastrowid
+
+    async def get_memories(self, user_id: int) -> list[dict]:
+        async with self.get_connection() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id, memory_text, created_at FROM user_memories WHERE user_id = ? ORDER BY id ASC",
+                (user_id,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(r) for r in rows]
+
+    async def delete_memory(self, memory_id: int, user_id: int) -> bool:
+        async with self.get_connection() as db:
+            cursor = await db.execute(
+                "DELETE FROM user_memories WHERE id = ? AND user_id = ?",
+                (memory_id, user_id)
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+
+    async def clear_memories(self, user_id: int) -> None:
+        async with self.get_connection() as db:
+            await db.execute("DELETE FROM user_memories WHERE user_id = ?", (user_id,))
             await db.commit()
 
     # --- Mensagens e Histórico ---
@@ -204,6 +266,16 @@ class Database:
                 rows = await cursor.fetchall()
                 return [{"role": r[0], "content": r[1]} for r in rows]
 
+    async def get_full_conversation_history(self, user_id: int) -> list[dict]:
+        async with self.get_connection() as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT id, role, content, model_used, created_at FROM messages WHERE user_id = ? ORDER BY id ASC",
+                (user_id,)
+            ) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(r) for r in rows]
+
     async def clear_history(self, user_id: int) -> None:
         async with self.get_connection() as db:
             await db.execute("DELETE FROM messages WHERE user_id = ?", (user_id,))
@@ -220,7 +292,6 @@ class Database:
             await db.commit()
 
     async def get_admin_dashboard_stats(self) -> dict:
-        """Coleta estatísticas completas de negócio para o painel de controle do Telegram."""
         async with self.get_connection() as db:
             async with db.execute("SELECT COUNT(*) FROM users") as c1:
                 total_users = (await c1.fetchone())[0]

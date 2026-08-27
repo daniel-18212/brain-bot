@@ -1,5 +1,5 @@
 """
-Telegram Bot Command Handlers — Resilient Delivery with Auto-Retry & Safe Fallbacks.
+Telegram Bot Command Handlers — Full Enterprise Feature Suite (v3.0).
 """
 import asyncio
 import logging
@@ -8,7 +8,13 @@ from telegram.constants import ParseMode, ChatAction
 from telegram.ext import Application, CommandHandler, ContextTypes
 from app.config import settings
 from app.database import db
-from app.core import llm_router, web_search_engine, image_generator
+from app.core import (
+    llm_router,
+    web_search_engine,
+    image_generator,
+    conversation_exporter,
+    SPECIALIZED_ASSISTANTS
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +39,6 @@ async def safe_reply(update: Update, text: str, reply_markup=None, parse_mode=Pa
         except Exception as e:
             logger.warning(f"Tentativa {attempt+1} de envio falhou: {e}")
             if attempt == 2:
-                # Falha final: tenta enviar sem formatação Markdown
                 try:
                     if update.callback_query:
                         return await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
@@ -44,7 +49,7 @@ async def safe_reply(update: Update, text: str, reply_markup=None, parse_mode=Pa
             await asyncio.sleep(0.5 * (attempt + 1))
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Menu Principal Executivo."""
+    """Menu Principal Executivo do BrainBot."""
     user_id = update.effective_user.id
     if not is_authorized(user_id):
         await safe_reply(update, "⛔ Acesso não autorizado a este servidor.")
@@ -58,19 +63,24 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     model_info = llm_router.AVAILABLE_MODELS.get(user['selected_model'], {})
     model_name = model_info.get('name', user['selected_model'].upper())
+    voice_status = "🔊 Ativo" if user.get("voice_mode_enabled") else "🔇 Desativado"
 
     keyboard = [
         [
-            InlineKeyboardButton("⚡ Trocar Modelo de IA", callback_data="menu:modelos"),
+            InlineKeyboardButton("⚡ Motores de IA", callback_data="menu:modelos"),
+            InlineKeyboardButton("🎭 Especialistas GPTs", callback_data="menu:assistentes"),
+        ],
+        [
+            InlineKeyboardButton("🎙️ Modo Voz (TTS)", callback_data="menu:toggle_voice"),
+            InlineKeyboardButton("🧠 Minhas Memórias", callback_data="menu:memorias"),
+        ],
+        [
+            InlineKeyboardButton("📄 Exportar Chat (PDF)", callback_data="menu:exportar"),
             InlineKeyboardButton("🧹 Novo Chat", callback_data="menu:limpar"),
         ],
         [
-            InlineKeyboardButton("🌐 Busca na Web", callback_data="menu:web_help"),
-            InlineKeyboardButton("🎨 Criar Imagem HD", callback_data="menu:img_help"),
-        ],
-        [
             InlineKeyboardButton("📊 Telemetria & Status", callback_data="menu:status"),
-            InlineKeyboardButton("🎭 Personalizar Persona", callback_data="menu:prompt_help"),
+            InlineKeyboardButton("🎨 Criar Imagem HD", callback_data="menu:img_help"),
         ],
     ]
 
@@ -80,18 +90,18 @@ async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ])
 
     keyboard.append([
-        InlineKeyboardButton("❓ Guia de Recursos", callback_data="menu:ajuda")
+        InlineKeyboardButton("❓ Guia Completo de Comandos", callback_data="menu:ajuda")
     ])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     menu_text = (
-        "✨ *BrainBot AI Assistant* • `v2.5`\n"
+        "✨ *BrainBot AI Enterprise* • `v3.0`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n"
         f"🤖 *Motor Ativo:* {model_name}\n"
-        f"🟢 *Status:* `Online 24/7` | ⭐ *Plano:* `{user.get('tier', 'free').upper()}`\n"
+        f"🎙️ *Modo Voz:* `{voice_status}` | ⭐ *Plano:* `{user.get('tier', 'free').upper()}`\n"
         "━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Como posso te ajudar hoje? Escolha uma opção rápida abaixo ou digite sua pergunta diretamente no chat:"
+        "Como posso te ajudar hoje? Escolha uma ação rápida abaixo ou converse diretamente no chat:"
     )
 
     await safe_reply(update, menu_text, reply_markup=reply_markup)
@@ -136,6 +146,103 @@ async def cmd_modelos(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await safe_reply(update, text, reply_markup=reply_markup)
 
+async def cmd_assistentes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Menu de Assistentes Especialistas (GPTs Prontos)."""
+    user_id = update.effective_user.id
+    if not is_authorized(user_id): return
+
+    keyboard = [
+        [InlineKeyboardButton("👨‍💻 Tech Lead & Arquiteto Sênior", callback_data="set_asst:dev_lead")],
+        [InlineKeyboardButton("📈 Analista Financeiro & Investimentos", callback_data="set_asst:finance")],
+        [InlineKeyboardButton("✍️ Copywriter & Criador de Conteúdo", callback_data="set_asst:copywriter")],
+        [InlineKeyboardButton("⚖️ Auditor Jurídico & Contratos", callback_data="set_asst:legal")],
+        [InlineKeyboardButton("🇬🇧 Professor de Inglês Interativo", callback_data="set_asst:english_tutor")],
+        [InlineKeyboardButton("🔄 Restaurar Assistente Geral Padrão", callback_data="set_asst:default")],
+        [InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    text = (
+        "🎭 *ESPECIALISTAS & PERSONAS PROFISSIONAIS (GPTS)*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "Escolha um perfil especializado para transformar o comportamento do BrainBot com 1 clique:"
+    )
+    await safe_reply(update, text, reply_markup=reply_markup)
+
+async def cmd_voz(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ativa ou desativa as respostas faladas em áudio (Text-to-Speech)."""
+    user_id = update.effective_user.id
+    if not is_authorized(user_id): return
+
+    new_state = await db.toggle_voice_mode(user_id)
+    state_str = "🔊 *Ativado!* A partir de agora o bot responderá com mensagens de voz." if new_state else "🔇 *Desativado!* O bot responderá apenas por texto."
+    
+    if update.callback_query:
+        back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
+        await safe_reply(update, f"🎙️ **Modo de Voz:** {state_str}", reply_markup=back_kb)
+    else:
+        await safe_reply(update, f"🎙️ **Modo de Voz:** {state_str}")
+
+async def cmd_lembrar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Grava uma memória permanente de longo prazo sobre o usuário."""
+    user_id = update.effective_user.id
+    if not is_authorized(user_id): return
+
+    memory_text = " ".join(context.args)
+    if not memory_text:
+        await safe_reply(update, "ℹ️ *Uso:* `/lembrar eu uso Linux Mint e programo em Python e Rust`")
+        return
+
+    await db.add_memory(user_id, memory_text)
+    await safe_reply(update, f"🧠 *Memória guardada com sucesso!*\n\n_\"{memory_text}\"_\n\nO BrainBot lembrará disso em todas as conversas futuras.")
+
+async def cmd_memorias(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lista e gerencia memórias salvas do usuário."""
+    user_id = update.effective_user.id
+    if not is_authorized(user_id): return
+
+    memories = await db.get_memories(user_id)
+    if not memories:
+        text = "🧠 *Nenhuma memória personalizada salva ainda.*\n\nPara gravar algo, digite:\n`/lembrar [fato sobre você]`"
+        back_kb = InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]])
+        await safe_reply(update, text, reply_markup=back_kb)
+        return
+
+    lines = ["🧠 *MEMÓRIAS DE LONGO PRAZO SALVAS:*\n━━━━━━━━━━━━━━━━━━━━━"]
+    for m in memories:
+        lines.append(f"• `[ID {m['id']}]` {m['memory_text']}")
+
+    lines.append("\n_Para apagar tudo, use o botão abaixo:_")
+    keyboard = [
+        [InlineKeyboardButton("🗑️ Apagar Todas as Memórias", callback_data="memories:clear_all")],
+        [InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await safe_reply(update, "\n".join(lines), reply_markup=reply_markup)
+
+async def cmd_exportar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Menu para exportar histórico da conversa."""
+    user_id = update.effective_user.id
+    if not is_authorized(user_id): return
+
+    keyboard = [
+        [
+            InlineKeyboardButton("📄 Exportar como PDF", callback_data="export:pdf"),
+            InlineKeyboardButton("📝 Exportar como Markdown", callback_data="export:md"),
+        ],
+        [
+            InlineKeyboardButton("📋 Exportar como TXT", callback_data="export:txt"),
+            InlineKeyboardButton("⬅️ Voltar ao Menu", callback_data="menu:main"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    text = (
+        "📑 *EXPORTAÇÃO DO HISTÓRICO DA CONVERSA*\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "Escolha o formato no qual deseja baixar todo o relatório da conversa atual:"
+    )
+    await safe_reply(update, text, reply_markup=reply_markup)
+
 async def cmd_limpar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_authorized(user_id): return
@@ -159,7 +266,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━━\n"
         f"🤖 *Motor Ativo:* {model_info.get('name', user['selected_model'])}\n"
         f"🏢 *Provedor:* `{model_info.get('provider', 'N/A')}`\n"
-        f"📝 *Foco:* _{model_info.get('description', '')}_\n"
+        f"🎙️ *Modo Voz:* `{'Ativo' if user.get('voice_mode_enabled') else 'Desativado'}`\n"
         f"🔒 *Acesso:* `{settings.ACCESS_MODE}` | ⭐ *Plano:* `{user.get('tier', 'free').upper()}`\n"
         f"🩺 *Healthcheck:* `http://localhost:8080/health` (Healthy)"
     )
@@ -226,6 +333,11 @@ def register_commands(app: Application):
     app.add_handler(CommandHandler("help", cmd_menu))
     app.add_handler(CommandHandler("ajuda", cmd_menu))
     app.add_handler(CommandHandler("modelos", cmd_modelos))
+    app.add_handler(CommandHandler("assistentes", cmd_assistentes))
+    app.add_handler(CommandHandler("voz", cmd_voz))
+    app.add_handler(CommandHandler("lembrar", cmd_lembrar))
+    app.add_handler(CommandHandler("memorias", cmd_memorias))
+    app.add_handler(CommandHandler("exportar", cmd_exportar))
     app.add_handler(CommandHandler("limpar", cmd_limpar))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("web", cmd_web))
