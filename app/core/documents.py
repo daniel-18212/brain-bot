@@ -1,10 +1,9 @@
 """
-Multi-Format Document Parser (PDF, TXT, CSV, DOCX, Code) with OCR Fallback.
+Multi-Format Document Parser (PDF, TXT, CSV, DOCX, Code) with High-Performance Text Extraction.
 """
 import io
 import logging
 import pypdf
-import google.generativeai as genai
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -27,25 +26,6 @@ class DocumentParser:
                     page_text = page.extract_text() or ""
                     if page_text.strip():
                         extracted += f"\n--- Página {page_num} ---\n{page_text}"
-                
-                # Se for PDF escaneado (imagem sem texto selecionável) e tiver Gemini API
-                if len(extracted.strip()) < 30 and settings.GEMINI_API_KEY:
-                    logger.info(f"PDF '{file_name}' parece ser escaneado. Ativando OCR via Gemini Multimodal...")
-                    try:
-                        model = genai.GenerativeModel("gemini-2.0-flash")
-                        pdf_part = {
-                            "mime_type": "application/pdf",
-                            "data": bytes(file_bytes)
-                        }
-                        response = model.generate_content([
-                            pdf_part,
-                            "Extraia e transcreva todo o conteúdo textual e estruturado deste documento PDF com máxima fidelidade:"
-                        ])
-                        if response and response.text:
-                            extracted = response.text
-                            logger.info(f"OCR via Gemini concluiu extração de {len(extracted)} caracteres.")
-                    except Exception as ocr_err:
-                        logger.warning(f"Falha no OCR Gemini do PDF: {ocr_err}")
 
             # 2. Arquivos de Texto / Código / CSV / JSON / Markdown
             else:
@@ -53,13 +33,13 @@ class DocumentParser:
 
             # Trunca de forma segura caso o documento seja gigantesco
             if len(extracted) > max_chars:
-                extracted = extracted[:max_chars] + f"\n\n[... Truncado para caber no limite de {max_chars} caracteres ...]"
+                extracted = extracted[:max_chars] + f"\n\n[... Truncado após {max_chars} caracteres para otimização de contexto ...]"
 
             result = extracted.strip()
             if not result:
                 return (
                     "⚠️ O arquivo foi recebido, mas não contém texto selecionável (pode ser uma imagem escaneada). "
-                    "Por favor, envie o texto copiado ou uma foto clara da página para análise via Visão Computacional."
+                    "Por favor, envie uma foto da página para que o Gemini Vision analise os detalhes visuais."
                 )
 
             return result
