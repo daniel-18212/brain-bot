@@ -3,38 +3,38 @@ High-Speed Audio Transcription Module using Free-Tier Groq Whisper-Large-V3.
 """
 import io
 import logging
-from groq import AsyncGroq
 from openai import AsyncOpenAI
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 class AudioTranscriber:
-    def __init__(self):
-        self.groq_client = AsyncGroq(api_key=settings.GROQ_API_KEY) if settings.GROQ_API_KEY else None
-        self.openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None
-
     async def transcribe(self, audio_bytes: io.BytesIO, filename: str = "voice.ogg") -> str:
         """Transcreve áudio com velocidade recorde via Groq Whisper ou OpenAI."""
         
         # 1. GROQ WHISPER (100% Grátis e resposta em < 500ms)
-        if self.groq_client:
+        if settings.GROQ_API_KEY:
             try:
                 audio_bytes.seek(0)
-                transcription = await self.groq_client.audio.transcriptions.create(
+                client = AsyncOpenAI(
+                    api_key=settings.GROQ_API_KEY,
+                    base_url="https://api.groq.com/openai/v1"
+                )
+                transcription = await client.audio.transcriptions.create(
                     file=(filename, audio_bytes.read()),
-                    model="whisper-large-v3",
+                    model="whisper-large-v3-turbo",
                     response_format="text"
                 )
-                return transcription
+                return str(transcription)
             except Exception as e:
                 logger.warning(f"Falha no Groq Whisper: {e}")
 
         # 2. OPENAI WHISPER (Fallback)
-        if self.openai_client:
+        if settings.OPENAI_API_KEY:
             try:
                 audio_bytes.seek(0)
-                transcription = await self.openai_client.audio.transcriptions.create(
+                client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+                transcription = await client.audio.transcriptions.create(
                     file=(filename, audio_bytes.read()),
                     model="whisper-1"
                 )

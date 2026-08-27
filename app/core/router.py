@@ -2,7 +2,7 @@
 Unified Multi-Provider LLM Router with Auto-Failover, Fallback Alerts, and Footer Badges.
 1. DeepSeek API (V4 / V3 & R1 Reasoner)
 2. Google Gemini (3.6 Flash - Free Tier)
-3. Groq Cloud (Llama 3.3 70B & DeepSeek R1 Distill - Free Tier)
+3. Groq Cloud (GPT-OSS 120B / Qwen 3.8 - Free Tier)
 4. GitHub Models / Azure AI (Official GPT-4o & GPT-4o Mini - Free Tier)
 """
 from typing import AsyncGenerator, Tuple
@@ -47,10 +47,10 @@ class LLMRouter:
             "badge": "⚡ Gemini 3.6 Flash"
         },
         "groq-llama": {
-            "name": "🚀 Llama 3.3 70B",
+            "name": "🚀 GPT-OSS 120B (Groq)",
             "provider": "Groq Cloud (Grátis)",
-            "description": "Velocidade extrema de 300+ tokens/segundo em hardware LPU.",
-            "badge": "🚀 Llama 3.3 70B"
+            "description": "Motor de 120 bilhões de parâmetros rodando a 300+ tokens/segundo.",
+            "badge": "🚀 GPT-OSS 120B (Groq)"
         },
         "github-gpt4o": {
             "name": "🟢 GPT-4o Oficial",
@@ -166,11 +166,11 @@ class LLMRouter:
                     circuit_breaker.record_success(current_model)
                     return
 
-                # 3. GROQ CLOUD (Llama 3.3 70B - Grátis)
+                # 3. GROQ CLOUD (GPT-OSS 120B / LPU - Grátis)
                 elif current_model == "groq-llama" and self.client_groq:
                     formatted_msgs = [{"role": "system", "content": sys_prompt}] + messages
                     stream = await self.client_groq.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
+                        model="openai/gpt-oss-120b",
                         messages=formatted_msgs,
                         stream=True
                     )
