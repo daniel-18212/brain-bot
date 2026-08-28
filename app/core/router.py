@@ -1,5 +1,5 @@
 """
-Unified Multi-Provider LLM Router with Auto-Failover, Resilient HTTPX Pool, and Live Web Grounding.
+Unified Multi-Provider LLM Router with Auto-Failover, State-of-the-Art Conversational Persona, and SOTA Sampling Parameters.
 """
 from datetime import datetime
 import logging
@@ -12,20 +12,26 @@ from app.core.resilience import circuit_breaker
 logger = logging.getLogger(__name__)
 
 def get_system_prompt_with_live_time(custom_prompt: str | None = None) -> str:
-    """Gera o prompt do sistema injetando a data e hora atual do mundo real com tom humano e conversacional."""
+    """
+    Gera o prompt mestre do BrainBot com alinhamento de 4ª geração (padrão OpenAI/Google SOTA).
+    Projetado para soar 100% natural, perspicaz, sem clichês e com densidade adaptativa.
+    """
     now_str = datetime.now().strftime("%d de %B de %Y, %H:%M")
     
     base_prompt = custom_prompt or (
-        "Você é o BrainBot, um assistente de IA extremamente inteligente, natural, simpático e direto ao ponto — com a mesma fluidez conversacional do ChatGPT e do Gemini.\n\n"
-        "DIRETRIZES DE PERSONALIDADE E ESTILO:\n"
-        "1. **Tom Humano e Natural:** Converse como uma pessoa real e articulada. Seja caloroso, direto e perspicaz. Evite soar engessado, corporativo em excesso ou robótico.\n"
-        "2. **Zero Clichês de Robô:** NUNCA use introduções ou encerramentos repetitivos como 'Com base nas informações...', 'Como uma IA...', 'Segue abaixo...', ou 'Espero ter ajudado!'. Vá direto ao que interessa com naturalidade.\n"
-        "3. **Respostas Proporcionais:** Adapte a resposta ao contexto. Se o usuário mandar uma saudação simples ou pergunta rápida, responda de forma leve e rápida. Se pedir uma análise profunda, entregue uma resposta completa e estruturada.\n"
-        "4. **Integração Web Transparente:** Quando houver dados da web ou notícias em tempo real no contexto, converse sobre eles como alguém bem informado que acabou de ler a respeito, citando detalhes de forma fluida sem parecer um relatório mecânico.\n"
-        "5. **Markdown Orgânico:** Use negrito, tópicos e formatação apenas quando realmente tornar a leitura agradável e clara no Telegram, sem poluir visualmente."
+        "Você é o BrainBot, uma inteligência artificial de altíssimo nível, perspicaz, carismática, extremamente competente e natural — no mesmo nível conversacional do ChatGPT-4o e do Gemini Pro.\n\n"
+        "### PRINCÍPIOS DE CONVERSA E COMUNICAÇÃO:\n"
+        "1. **Naturalidade Total e Fluidez:** Converse como um profissional sênior brilhante, descontraído e empático. Seja genuíno, fluido e direto. Esqueça qualquer tom mecânico ou formalidade burocrática.\n"
+        "2. **Zero Clichês de Robô:** NUNCA use frases pré-fabricadas como 'Com base nas informações fornecidas...', 'Como um assistente de IA...', 'Segue abaixo...', 'Certamente!', ou 'Espero ter ajudado!'. Vá direto ao cerne da resposta.\n"
+        "3. **Densidade Adaptativa:**\n"
+        "   - Para perguntas casuais ou mensagens curtas: seja conciso, rápido e caloroso.\n"
+        "   - Para problemas complexos, código ou estratégia: entregue raciocínio profundo, estruturado e completo, explicando os porquês.\n"
+        "4. **Domínio de Dados e Atualidade:** Você está plenamente ciente do momento atual do mundo. Quando receber dados em tempo real da Web ou tendências do X/Twitter, incorpore essas informações organicamente como quem lê e acompanha os fatos diariamente.\n"
+        "5. **Formatação Impecável:** Use Markdown limpo e agradável aos olhos (negritos nos pontos-chave, listas fáceis de escanear, blocos de código com a sintaxe correta).\n"
+        "6. **Programação e Lógica de Alto Nível:** Ao escrever código, forneça implementações completas, modernas, seguras e prontas para produção, sem placeholders preguiçosos."
     )
     
-    time_context = f"\n\n[Contexto temporal: Hoje é {now_str} (Horário de Brasília)]."
+    time_context = f"\n\n[Horário e data atual de referência: {now_str} (Horário de Brasília)]."
     return base_prompt + time_context
 
 class LLMRouter:
@@ -123,6 +129,14 @@ class LLMRouter:
         unique_order = list(dict.fromkeys(fallback_order))
         last_error = None
 
+        # Parâmetros de amostragem de alta qualidade conversacional (SOTA)
+        sampling_params = {
+            "temperature": 0.7,
+            "top_p": 0.95,
+            "presence_penalty": 0.1,
+            "frequency_penalty": 0.1,
+        }
+
         for current_model in unique_order:
             if not circuit_breaker.is_available(current_model):
                 logger.info(f"Pulando modelo '{current_model}' (Circuit Breaker aberto).")
@@ -140,10 +154,14 @@ class LLMRouter:
                     ds_model = "deepseek-reasoner" if current_model == "deepseek-r1" else "deepseek-chat"
                     formatted_msgs = [{"role": "system", "content": sys_prompt}] + messages
                     
+                    # DeepSeek Reasoner não aceita temperature/presence_penalty customizados
+                    req_params = {} if current_model == "deepseek-r1" else sampling_params
+                    
                     stream = await self.client_deepseek.chat.completions.create(
                         model=ds_model,
                         messages=formatted_msgs,
-                        stream=True
+                        stream=True,
+                        **req_params
                     )
                     
                     accumulated_content = ""
@@ -165,7 +183,9 @@ class LLMRouter:
                     stream = await self.client_gemini.chat.completions.create(
                         model="gemini-3.6-flash",
                         messages=formatted_msgs,
-                        stream=True
+                        stream=True,
+                        temperature=0.7,
+                        top_p=0.95
                     )
                     
                     accumulated_content = ""
@@ -184,7 +204,9 @@ class LLMRouter:
                     stream = await self.client_groq.chat.completions.create(
                         model="openai/gpt-oss-120b",
                         messages=formatted_msgs,
-                        stream=True
+                        stream=True,
+                        temperature=0.7,
+                        top_p=0.95
                     )
                     
                     accumulated_content = ""
@@ -204,7 +226,9 @@ class LLMRouter:
                     stream = await self.client_github.chat.completions.create(
                         model=gh_model,
                         messages=formatted_msgs,
-                        stream=True
+                        stream=True,
+                        temperature=0.7,
+                        top_p=0.95
                     )
                     
                     accumulated_content = ""
