@@ -94,7 +94,24 @@ async def stream_chat_response(
         except Exception as e:
             logger.warning(f"Falha na leitura da URL: {e}")
 
-    # 3. Detecção Inteligente de Busca na Web (Auto Web Grounding)
+    # 3. Detecção Específica de Trending Topics do X (Twitter)
+    elif any(k in user_prompt.lower() for k in ["trending", "trends", "twitter", "bombando no x", "em alta no x", "assuntos do momento"]):
+        try:
+            await msg_status.edit_text("🔥 *Consultando Trending Topics do X (Twitter) Brasil em tempo real...*", parse_mode=ParseMode.MARKDOWN)
+            from app.core.trends_extractor import trends_extractor
+            trends_data = await trends_extractor.get_trends_summary_prompt()
+            web_news = await web_search_engine.search("noticias brasil hoje manchetes", max_results=3)
+            await db.record_usage(user_id, "trends_x")
+            final_prompt = (
+                f"{trends_data}\n\n"
+                f"{web_news}\n\n"
+                f"[SOLICITAÇÃO DO USUÁRIO]:\n{user_prompt}\n\n"
+                "Instrução: Apresente os tópicos em alta no X (Twitter) Brasil de forma dinâmica e moderna, explicando o contexto dos principais destaques."
+            )
+        except Exception as e:
+            logger.warning(f"Falha ao consultar Trends do X: {e}")
+
+    # 4. Detecção Inteligente de Busca na Web Geral (Auto Web Grounding)
     elif web_search_engine.should_trigger_search(user_prompt):
         try:
             await msg_status.edit_text("🌐 *Consultando a internet em tempo real...*", parse_mode=ParseMode.MARKDOWN)

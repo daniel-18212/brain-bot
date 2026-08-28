@@ -39,6 +39,7 @@ async def post_init(application) -> None:
     # Configura o Menu Nativo de Comandos no Telegram
     bot_commands = [
         BotCommand("menu", "Menu Principal com todos os recursos"),
+        BotCommand("trends", "Trending Topics do X (Twitter) Brasil"),
         BotCommand("modelos", "Alternar Motores de IA"),
         BotCommand("assistentes", "Especialistas Profissionais (GPTs)"),
         BotCommand("voz", "Ligar/Desligar Modo de Voz (Áudio)"),

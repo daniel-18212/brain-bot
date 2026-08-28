@@ -9,6 +9,7 @@ from app.core.url_reader import url_reader
 from app.core.chart_generator import chart_generator
 from app.core.exporter import conversation_exporter
 from app.core.assistants import SPECIALIZED_ASSISTANTS
+from app.core.trends_extractor import trends_extractor
 
 __all__ = [
     "llm_router",
@@ -22,4 +23,5 @@ __all__ = [
     "chart_generator",
     "conversation_exporter",
     "SPECIALIZED_ASSISTANTS",
+    "trends_extractor",
 ]

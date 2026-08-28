@@ -392,11 +392,23 @@ async def cmd_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await db.update_user_system_prompt(user_id, custom_p)
     await safe_reply(update, f"🎭 Personalidade atualizada:\n_{custom_p}_")
 
+async def cmd_trends(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gera relatório instantâneo dos Trending Topics do X (Twitter) Brasil."""
+    user_id = update.effective_user.id
+    if not await db.is_user_authorized(user_id):
+        await show_unauthorized_card(update, context)
+        return
+
+    from app.handlers.messages import stream_chat_response
+    prompt = "Quais são os assuntos mais comentados e trending topics do X (Twitter) Brasil agora? Me dê um resumo detalhado e os motivos de cada destaque."
+    await stream_chat_response(update, context, prompt, user_id)
+
 def register_commands(app: Application):
     app.add_handler(CommandHandler("menu", cmd_menu))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_menu))
     app.add_handler(CommandHandler("ajuda", cmd_menu))
+    app.add_handler(CommandHandler("trends", cmd_trends))
     app.add_handler(CommandHandler("modelos", cmd_modelos))
     app.add_handler(CommandHandler("assistentes", cmd_assistentes))
     app.add_handler(CommandHandler("voz", cmd_voz))
