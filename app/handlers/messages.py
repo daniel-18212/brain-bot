@@ -1,5 +1,5 @@
 """
-Master Message Handler: Real-Time Streaming, Client Quotas, Long-Term Memory, URL Scraper, Chart Execution, and Voice Synthesis.
+Master Message Handler: Real-Time Streaming, Client Quotas, Long-Term Memory, Real-Time Web Grounding, and TTS Voice Synthesis.
 """
 import asyncio
 import logging
@@ -26,7 +26,7 @@ async def keep_typing_alive(bot, chat_id: int, stop_event: asyncio.Event):
     try:
         while not stop_event.is_set():
             await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
-            await asyncio.sleep(3)
+            await asyncio.sleep(4)
     except Exception:
         pass
 
@@ -66,15 +66,16 @@ async def stream_chat_response(
     memories = await db.get_memories(user_id)
     memory_context = ""
     if memories:
-        memory_lines = [f"- {m["memory_text"]}" for m in memories]
+        memory_lines = [f"- {m['memory_text']}" for m in memories]
         memory_context = "\n\n[MEMÓRIAS PERMANENTES E PREFERÊNCIAS SALVAS DO USUÁRIO]:\n" + "\n".join(memory_lines)
 
-    full_system_prompt = (custom_sys or llm_router.DEFAULT_SYSTEM_PROMPT) + memory_context
+    base_system_prompt = custom_sys or ""
+    full_system_prompt = base_system_prompt + memory_context if (base_system_prompt or memory_context) else None
 
     stop_typing_event = asyncio.Event()
     typing_task = asyncio.create_task(keep_typing_alive(context.bot, chat_id, stop_typing_event))
 
-    msg_status = await update.message.reply_text("✨ *Processando sua mensagem...*", parse_mode=ParseMode.MARKDOWN)
+    msg_status = await update.message.reply_text("✨ *Processando...*", parse_mode=ParseMode.MARKDOWN)
 
     # 2. Detecção e Leitura Automática de Links / URLs
     final_prompt = user_prompt
@@ -82,7 +83,7 @@ async def stream_chat_response(
     if urls:
         try:
             target_url = urls[0]
-            await msg_status.edit_text(f"🔗 *Acessando e extraindo conteúdo da página:* `{target_url}`...", parse_mode=ParseMode.MARKDOWN)
+            await msg_status.edit_text(f"🔗 *Acessando conteúdo da página:* `{target_url}`...", parse_mode=ParseMode.MARKDOWN)
             page_text = await url_reader.fetch_page_content(target_url)
             await db.record_usage(user_id, "url_read")
             final_prompt = (
@@ -97,12 +98,13 @@ async def stream_chat_response(
     elif web_search_engine.should_trigger_search(user_prompt):
         try:
             await msg_status.edit_text("🌐 *Consultando a internet em tempo real...*", parse_mode=ParseMode.MARKDOWN)
-            web_data = await web_search_engine.search(user_prompt, max_results=4)
+            web_data = await web_search_engine.search(user_prompt, max_results=5)
             await db.record_usage(user_id, "web_search")
             final_prompt = (
-                f"[DADOS EM TEMPO REAL DA WEB]:\n{web_data}\n\n"
+                f"{web_data}\n\n"
                 f"[PERGUNTA DO USUÁRIO]:\n{user_prompt}\n\n"
-                "Responda à pergunta do usuário utilizando as informações mais recentes da web acima."
+                "Instrução: Use os dados mais recentes da web fornecidos acima para responder à pergunta do usuário com precisão, clareza e autoridade. "
+                "Cite as fontes e nunca diga que não tem acesso à internet."
             )
         except Exception as e:
             logger.warning(f"Falha na auto-busca web: {e}")
@@ -151,6 +153,8 @@ async def stream_chat_response(
                     last_update = now
                 except BadRequest:
                     pass
+                except Exception:
+                    pass
 
         stop_typing_event.set()
         await typing_task
@@ -173,8 +177,12 @@ async def stream_chat_response(
                 except Exception:
                     await msg_status.edit_text(final_text)
             else:
-                await msg_status.delete()
-                for i in range(0, len(final_text), 4000):
+                try:
+                    await msg_status.edit_text(final_text[:4000], parse_mode=ParseMode.MARKDOWN)
+                except Exception:
+                    await msg_status.edit_text(final_text[:4000])
+                
+                for i in range(4000, len(final_text), 4000):
                     chunk = final_text[i:i+4000]
                     try:
                         await update.message.reply_text(chunk, parse_mode=ParseMode.MARKDOWN)
@@ -211,7 +219,10 @@ async def stream_chat_response(
     except Exception as e:
         stop_typing_event.set()
         logger.error(f"Erro no processamento de mensagem: {e}")
-        await msg_status.edit_text(f"❌ Ocorreu um erro ao processar sua resposta: `{e}`", parse_mode=ParseMode.MARKDOWN)
+        try:
+            await msg_status.edit_text(f"❌ Ocorreu um erro ao processar sua resposta: `{e}`", parse_mode=ParseMode.MARKDOWN)
+        except Exception:
+            pass
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
