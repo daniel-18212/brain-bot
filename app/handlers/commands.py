@@ -362,7 +362,9 @@ async def cmd_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.UPLOAD_PHOTO)
-    msg_wait = await update.message.reply_text("🎨 *Renderizando imagem em alta definição...*", parse_mode=ParseMode.MARKDOWN)
+    msg_wait = await update.message.reply_text("🎨 *Conectando ao motor Flux.1 HD...*", parse_mode=ParseMode.MARKDOWN)
+    from app.core.animations import AnimatedLoader
+    loader = AnimatedLoader(msg_wait, preset="image_gen", interval=1.2).start()
 
     url_img = image_generator.get_image_url(prompt)
     await db.record_usage(user_id, "image_gen")
@@ -373,8 +375,10 @@ async def cmd_imagem(update: Update, context: ContextTypes.DEFAULT_TYPE):
             caption=f"🎨 *Prompt:* _{prompt}_\n\n▫️ _Flux.1 HD Engine_",
             parse_mode=ParseMode.MARKDOWN
         )
+        await loader.stop()
         await msg_wait.delete()
     except Exception as e:
+        await loader.stop()
         await msg_wait.edit_text(f"❌ Erro na renderização: {e}")
 
 async def cmd_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):

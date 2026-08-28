@@ -10,6 +10,7 @@ from app.core.chart_generator import chart_generator
 from app.core.exporter import conversation_exporter
 from app.core.assistants import SPECIALIZED_ASSISTANTS
 from app.core.trends_extractor import trends_extractor
+from app.core.animations import AnimatedLoader, ANIMATION_PRESETS
 
 __all__ = [
     "llm_router",
@@ -24,4 +25,6 @@ __all__ = [
     "conversation_exporter",
     "SPECIALIZED_ASSISTANTS",
     "trends_extractor",
+    "AnimatedLoader",
+    "ANIMATION_PRESETS",
 ]

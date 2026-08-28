@@ -1,5 +1,5 @@
 """
-Media Handlers: Photos (Vision), Audio/Voice Notes, and Documents (PDFs, Code) with Client Quotas.
+Media Handlers: Photos (Vision), Audio/Voice Notes, and Documents (PDFs, Code) with Animated Loading Frames.
 """
 import io
 import logging
@@ -8,7 +8,7 @@ from telegram.constants import ParseMode, ChatAction
 from telegram.ext import Application, MessageHandler, ContextTypes, filters
 from app.config import settings
 from app.database import db
-from app.core import vision_analyzer, audio_transcriber, document_parser
+from app.core import vision_analyzer, audio_transcriber, document_parser, AnimatedLoader
 from app.handlers.messages import stream_chat_response
 from app.handlers.commands import show_unauthorized_card
 
@@ -29,7 +29,8 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1]
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-    msg_status = await update.message.reply_text("✨ *Analisando imagem com Visão Computacional...*", parse_mode=ParseMode.MARKDOWN)
+    msg_status = await update.message.reply_text("👁️ *Carregando imagem...*", parse_mode=ParseMode.MARKDOWN)
+    loader = AnimatedLoader(msg_status, preset="vision", interval=1.2).start()
 
     try:
         photo_file = await context.bot.get_file(photo.file_id)
@@ -43,9 +44,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await db.save_message(user_id, "user", f"[Foto enviada] {caption}")
         await db.save_message(user_id, "assistant", analysis)
 
+        await loader.stop()
         resp_text = f"{analysis}\n\n▫️ _⚡ Gemini 3.6 Flash (Vision)_"
         await msg_status.edit_text(resp_text, parse_mode=ParseMode.MARKDOWN)
     except Exception as e:
+        await loader.stop()
         logger.error(f"Erro no processamento de foto: {e}")
         await msg_status.edit_text(f"❌ Erro ao analisar imagem: `{e}`", parse_mode=ParseMode.MARKDOWN)
 
@@ -57,7 +60,8 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     voice = update.message.voice or update.message.audio
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.RECORD_VOICE)
-    msg_status = await update.message.reply_text("🎙️ *Transcrevendo áudio via Groq Whisper...*", parse_mode=ParseMode.MARKDOWN)
+    msg_status = await update.message.reply_text("🎙️ *Ouvindo áudio...*", parse_mode=ParseMode.MARKDOWN)
+    loader = AnimatedLoader(msg_status, preset="voice", interval=1.2).start()
 
     try:
         voice_file = await context.bot.get_file(voice.file_id)
@@ -68,11 +72,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         transcription = await audio_transcriber.transcribe(buffer)
         await db.record_usage(user_id, "audio")
 
+        await loader.stop()
         await msg_status.edit_text(f"🗣️ *Você disse:* _{transcription}_", parse_mode=ParseMode.MARKDOWN)
 
         await stream_chat_response(update, context, transcription, user_id, is_voice_input=True)
 
     except Exception as e:
+        await loader.stop()
         logger.error(f"Erro no áudio: {e}")
         await msg_status.edit_text(f"❌ Erro ao processar áudio: `{e}`", parse_mode=ParseMode.MARKDOWN)
 
@@ -86,7 +92,8 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = update.message.caption or "Faça uma leitura completa e análise detalhada deste arquivo:"
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
-    msg_status = await update.message.reply_text(f"📄 *Processando e extraindo documento:* `{doc.file_name}`...", parse_mode=ParseMode.MARKDOWN)
+    msg_status = await update.message.reply_text(f"📑 *Abrindo documento:* `{doc.file_name}`...", parse_mode=ParseMode.MARKDOWN)
+    loader = AnimatedLoader(msg_status, preset="document", interval=1.2).start()
 
     try:
         file = await context.bot.get_file(doc.file_id)
@@ -100,13 +107,16 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{extracted_text}\n\n"
             f"[SOLICITAÇÃO DO USUÁRIO]: {caption}"
         )
-        await msg_status.delete()
+
+        await loader.stop()
+        await msg_status.edit_text(f"✅ *Documento lido com sucesso:* `{doc.file_name}`", parse_mode=ParseMode.MARKDOWN)
 
         await stream_chat_response(update, context, prompt, user_id)
 
     except Exception as e:
+        await loader.stop()
         logger.error(f"Erro no documento: {e}")
-        await msg_status.edit_text(f"❌ Erro ao processar arquivo: `{e}`", parse_mode=ParseMode.MARKDOWN)
+        await msg_status.edit_text(f"❌ Erro ao ler documento: `{e}`", parse_mode=ParseMode.MARKDOWN)
 
 def register_media(app: Application):
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))

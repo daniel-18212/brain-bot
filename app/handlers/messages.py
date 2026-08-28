@@ -1,5 +1,5 @@
 """
-Master Message Handler: Real-Time Streaming, Client Quotas, Long-Term Memory, Real-Time Web Grounding, and TTS Voice Synthesis.
+Master Message Handler: Real-Time Streaming with Pulsating Cursor, Animated Loading Frames, Client Quotas, Long-Term Memory, and Multi-Modal AI.
 """
 import asyncio
 import logging
@@ -15,14 +15,15 @@ from app.core import (
     web_search_engine,
     url_reader,
     chart_generator,
-    tts_engine
+    tts_engine,
+    AnimatedLoader
 )
 from app.handlers.commands import show_unauthorized_card
 
 logger = logging.getLogger(__name__)
 
 async def keep_typing_alive(bot, chat_id: int, stop_event: asyncio.Event):
-    """Mantém a indicação de 'digitando...' ativa no topo do chat do Telegram."""
+    """Mantém a indicação nativa de digitação ativa no topo do Telegram."""
     try:
         while not stop_event.is_set():
             await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
@@ -37,7 +38,7 @@ async def stream_chat_response(
     user_id: int,
     is_voice_input: bool = False
 ):
-    """Executa a resposta completa com inteligência multi-camadas e cotas diárias de clientes."""
+    """Executa o ciclo completo de resposta com animações visuais dinâmicas e streaming suave."""
     
     # 0. Verificação de Autorização e Cotas de Uso
     if not await db.is_user_authorized(user_id):
@@ -62,7 +63,7 @@ async def stream_chat_response(
     custom_sys = user.get("custom_system_prompt")
     chat_id = update.effective_chat.id
 
-    # 1. Recupera Memórias Permanentes de Longo Prazo do Usuário
+    # 1. Memórias Permanentes de Longo Prazo
     memories = await db.get_memories(user_id)
     memory_context = ""
     if memories:
@@ -72,24 +73,26 @@ async def stream_chat_response(
     base_system_prompt = custom_sys or ""
     full_system_prompt = base_system_prompt + memory_context if (base_system_prompt or memory_context) else None
 
+    # Inicia animação visual de carregamento
+    msg_status = await update.message.reply_text("✨ *Pensando...*", parse_mode=ParseMode.MARKDOWN)
+    loader = AnimatedLoader(msg_status, preset="thinking", interval=1.1).start()
+
     stop_typing_event = asyncio.Event()
     typing_task = asyncio.create_task(keep_typing_alive(context.bot, chat_id, stop_typing_event))
 
-    msg_status = await update.message.reply_text("✨ *Processando...*", parse_mode=ParseMode.MARKDOWN)
+    final_prompt = user_prompt
 
     # 2. Detecção e Leitura Automática de Links / URLs
-    final_prompt = user_prompt
     urls = url_reader.extract_urls(user_prompt)
     if urls:
         try:
+            await loader.switch_preset("reading_url")
             target_url = urls[0]
-            await msg_status.edit_text(f"🔗 *Acessando conteúdo da página:* `{target_url}`...", parse_mode=ParseMode.MARKDOWN)
             page_text = await url_reader.fetch_page_content(target_url)
             await db.record_usage(user_id, "url_read")
             final_prompt = (
                 f"[CONTEÚDO DA PÁGINA WEB EXTRAÍDO]:\n{page_text}\n\n"
-                f"[SOLICITAÇÃO DO USUÁRIO]:\n{user_prompt}\n\n"
-                "Instrução: Analise as informações da página web extraída acima e elabore uma resposta estruturada."
+                f"[SOLICITAÇÃO DO USUÁRIO]:\n{user_prompt}"
             )
         except Exception as e:
             logger.warning(f"Falha na leitura da URL: {e}")
@@ -97,7 +100,7 @@ async def stream_chat_response(
     # 3. Detecção Específica de Trending Topics do X (Twitter)
     elif any(k in user_prompt.lower() for k in ["trending", "trends", "twitter", "bombando no x", "em alta no x", "assuntos do momento"]):
         try:
-            await msg_status.edit_text("🔥 *Buscando o que está bombando no X agora...*", parse_mode=ParseMode.MARKDOWN)
+            await loader.switch_preset("trends_x")
             from app.core.trends_extractor import trends_extractor
             trends_data = await trends_extractor.get_trends_summary_prompt()
             await db.record_usage(user_id, "trends_x")
@@ -111,7 +114,7 @@ async def stream_chat_response(
     # 4. Detecção Inteligente de Busca na Web Geral (Auto Web Grounding)
     elif web_search_engine.should_trigger_search(user_prompt):
         try:
-            await msg_status.edit_text("🌐 *Pesquisando na internet...*", parse_mode=ParseMode.MARKDOWN)
+            await loader.switch_preset("web_search")
             web_data = await web_search_engine.search(user_prompt, max_results=5)
             await db.record_usage(user_id, "web_search")
             final_prompt = (
@@ -121,13 +124,12 @@ async def stream_chat_response(
         except Exception as e:
             logger.warning(f"Falha na auto-busca web: {e}")
 
-    # 4. Detecção de Gráficos (Data Analysis)
+    # 5. Detecção de Gráficos (Data Analysis)
     is_chart_req = chart_generator.is_chart_request(user_prompt)
     if is_chart_req:
         final_prompt += (
-            "\n\n[INSTRUÇÃO IMPORTANTE]: Como o usuário solicitou um gráfico, inclua no final da sua resposta "
-            "um bloco de código Python executável usando exclusivamente a biblioteca `matplotlib.pyplot` (como `plt`), "
-            "sem placeholders, sem plt.show(), apenas com os dados e customização visual pronta."
+            "\n\n[INSTRUÇÃO DE GRÁFICO]: Como o usuário solicitou visualização de dados, inclua no final "
+            "um bloco Python executável usando exclusivamente matplotlib.pyplot (plt)."
         )
 
     messages = history + [{"role": "user", "content": final_prompt}]
@@ -137,6 +139,7 @@ async def stream_chat_response(
     accumulated_reasoning = ""
     actual_model_used = selected_model
     fallback_alert = ""
+    stream_started = False
 
     try:
         async for text_chunk, reasoning_chunk, current_model, fb_notice in llm_router.stream_response(
@@ -144,6 +147,11 @@ async def stream_chat_response(
             messages=messages,
             system_prompt=full_system_prompt
         ):
+            # No primeiro token que chega, encerramos a animação de loading e iniciamos o stream
+            if not stream_started and text_chunk.strip():
+                await loader.stop()
+                stream_started = True
+
             accumulated_text = text_chunk
             actual_model_used = current_model
             if fb_notice:
@@ -153,9 +161,10 @@ async def stream_chat_response(
 
             now = time.time()
             if now - last_update >= settings.STREAMING_THROTTLE_SECONDS and accumulated_text.strip():
-                display = accumulated_text
+                # Efeito visual de Cursor Vivo idêntico ao ChatGPT / Gemini ( ▌ )
+                display = accumulated_text + " ▌"
                 if accumulated_reasoning:
-                    display = f"💭 _Raciocínio:_\n`{accumulated_reasoning[-200:]}`\n\n{accumulated_text}"
+                    display = f"💭 _Raciocínio:_\n`{accumulated_reasoning[-200:]}`\n\n{accumulated_text} ▌"
                 
                 if len(display) > 4000:
                     display = display[:3990] + "..."
@@ -168,6 +177,8 @@ async def stream_chat_response(
                 except Exception:
                     pass
 
+        # Para tarefas de background
+        await loader.stop()
         stop_typing_event.set()
         await typing_task
 
@@ -201,7 +212,7 @@ async def stream_chat_response(
                     except Exception:
                         await update.message.reply_text(chunk)
 
-            # 5. Execução e Envio de Gráficos (se solicitado)
+            # 6. Execução e Envio de Gráficos (se solicitado)
             if is_chart_req and "plt." in accumulated_text:
                 try:
                     chart_buf = chart_generator.extract_and_run_matplotlib(accumulated_text)
@@ -214,7 +225,7 @@ async def stream_chat_response(
                 except Exception as chart_err:
                     logger.warning(f"Falha ao gerar gráfico: {chart_err}")
 
-            # 6. Resposta Falada por Áudio (Text-to-Speech)
+            # 7. Resposta Falada por Áudio (Text-to-Speech)
             voice_enabled = await db.is_voice_mode_enabled(user_id)
             if is_voice_input or voice_enabled:
                 try:
@@ -229,6 +240,7 @@ async def stream_chat_response(
                     logger.warning(f"Falha no envio de voz TTS: {tts_err}")
 
     except Exception as e:
+        await loader.stop()
         stop_typing_event.set()
         logger.error(f"Erro no processamento de mensagem: {e}")
         try:
